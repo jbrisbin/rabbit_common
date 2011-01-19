@@ -1,4 +1,4 @@
-= Rebar-friendly fork of Rabbit common
+# Rebar-friendly fork of Rabbit common
 
 This is a fork of the rabbit_common dependency, which is needed by the 
 [official RabbitMQ/AMQP Erlang client](https://github.com/rabbitmq/rabbitmq-erlang-client). 
