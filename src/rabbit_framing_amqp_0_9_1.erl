@@ -117,29 +117,29 @@
 -type(amqp_method_field_name() ::
        ( response | ticket | response | known_hosts
        | message_count | realm | nowait | delivery_tag
-       | passive | exclusive | delivery_tag | cluster_id
-       | delivery_tag | ticket | arguments | virtual_host
-       | source | frame_max | exclusive | nowait
+       | reply_code | exclusive | delivery_tag | cluster_id
+       | delivery_tag | reply_text | arguments | destination
+       | source | frame_max | queue | nowait
        | locale | immediate | routing_key | queue
-       | mechanism | routing_key | routing_key | queue
+       | mechanism | routing_key | routing_key | exclusive
        | message_count | reply_text | internal | channel_id
        | arguments | no_ack | destination | ticket
        | capabilities | source | heartbeat | arguments
-       | auto_delete | nowait | multiple | mechanisms
+       | auto_delete | channel_max | multiple | mechanisms
        | client_properties | nowait | passive | consumer_tag
        | class_id | insist | queue | exchange
-       | consumer_tag | method_id | reply_code | prefetch_count
+       | consumer_tag | method_id | passive | prefetch_count
        | no_local | routing_key | ticket | if_unused
-       | class_id | redelivered | ticket | nowait
-       | locales | active | nowait | ticket
+       | class_id | redelivered | challenge | nowait
+       | routing_key | active | nowait | ticket
        | auto_delete | reply_code | active | read
        | routing_key | consumer_tag | requeue | nowait
-       | challenge | passive | channel_max | queue
-       | reply_text | ticket | requeue | ticket
+       | ticket | passive | nowait | queue
+       | ticket | ticket | requeue | ticket
        | exchange | global | mandatory | reply_text
        | write | no_ack | queue | nowait
-       | routing_key | delivery_tag | prefetch_size | nowait
-       | destination | arguments | frame_max | ticket
+       | locales | delivery_tag | prefetch_size | nowait
+       | virtual_host | arguments | frame_max | ticket
        | if_unused | queue | nowait | exchange
        | ticket | arguments | routing_key | redelivered
        | delivery_tag | version_major | ticket | arguments
