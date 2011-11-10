@@ -136,60 +136,60 @@
        | #'test.string_ok'{} | #'test.table'{} | #'test.table_ok'{} | #'test.content'{}
        | #'test.content_ok'{} )).
 -type(amqp_method_field_name() ::
-       ( frame_max | no_ack | redelivered | requeue
-       | operation | exclusive | known_hosts | global
-       | staged_size | message_count | immediate | mechanism
-       | delivery_tag | ticket | version_major | server_properties
-       | nowait | arguments | ticket | identifier
-       | exchange | integer_op | active | routing_key
-       | routing_key | table | nowait | delivery_tag
-       | queue | prefetch_count | ticket | integer_4
-       | consumer_tag | identifier | heartbeat | ticket
-       | auto_delete | passive | channel_max | nowait
-       | read | reply_code | mandatory | exchange
-       | delivery_tag | response | no_ack | realm
-       | redelivered | integer_result | reply_code | version_minor
-       | exchange | ticket | nowait | operation
-       | arguments | queue | host | consumer_tag
-       | prefetch_size | multiple | ticket | if_unused
-       | result | channel_max | exchange | global
-       | routing_key | routing_key | nowait | no_ack
-       | exchange | mandatory | locale | string_result
-       | integer_1 | requeue | exclusive | type
-       | ticket | reply_text | content_size | routing_key
-       | active | if_unused | exchange | identifier
-       | global | no_local | queue | queue
-       | consumer_tag | ticket | virtual_host | exchange
-       | queue | client_properties | reply_text | multiple
-       | consumer_tag | internal | passive | delivery_tag
-       | prefetch_count | class_id | message_count | queue
-       | consumer_tag | consumer_tag | exchange | message_count
-       | challenge | queue | exchange | string_2
-       | consumer_tag | passive | immediate | cluster_id
-       | consumer_tag | integer_2 | queue | capabilities
-       | exclusive | no_local | dtx_identifier | heartbeat
-       | prefetch_size | ticket | routing_key | ticket
-       | routing_key | ticket | delivery_tag | exchange
-       | locales | details | consumer_tag | reply_code
-       | queue | method_id | result | reply_code
-       | method_id | exchange | out_of_band | requeue
-       | consumer_tag | reply_text | reply_code | exchange
-       | consume_rate | nowait | routing_key | nowait
-       | durable | requeue | exclusive | nowait
-       | integer_3 | mechanisms | exchange | active
-       | redelivered | ticket | delivery_tag | queue
-       | ticket | reply_text | reply_text | nowait
-       | prefetch_count | consumer_count | class_id | consumer_tag
-       | mandatory | reply_text | string_1 | message_count
-       | ticket | content_checksum | prefetch_size | arguments
-       | if_empty | consumer_tag | string_op | delivery_tag
-       | ticket | nowait | meta_data | routing_key
-       | response | frame_max | queue | insist
-       | routing_key | nowait | durable | reply_code
-       | arguments | routing_key | write | exclusive
-       | immediate | exchange | no_local | auto_delete
-       | nowait | consumer_tag | consumer_tag | known_hosts
-       | consumer_tag | delivery_tag )).
+       ( message_count | exchange | reply_code | delivery_tag
+       | ticket | content_checksum | nowait | prefetch_count
+       | no_ack | nowait | identifier | server_properties
+       | prefetch_size | details | routing_key | message_count
+       | arguments | no_local | exchange | global
+       | table | integer_2 | class_id | requeue
+       | nowait | no_ack | known_hosts | mandatory
+       | integer_op | prefetch_size | frame_max | if_unused
+       | queue | consumer_tag | response | content_size
+       | ticket | read | challenge | exchange
+       | reply_code | consumer_tag | queue | queue
+       | version_major | queue | consumer_tag | exchange
+       | ticket | exchange | consumer_tag | active
+       | heartbeat | reply_text | multiple | nowait
+       | prefetch_count | consumer_tag | string_2 | consumer_tag
+       | heartbeat | reply_code | delivery_tag | passive
+       | exchange | consumer_tag | string_op | mechanism
+       | consumer_tag | routing_key | prefetch_count | exclusive
+       | delivery_tag | integer_4 | version_minor | immediate
+       | cluster_id | dtx_identifier | reply_code | host
+       | integer_3 | no_local | ticket | consumer_tag
+       | exchange | arguments | queue | routing_key
+       | routing_key | ticket | reply_text | ticket
+       | method_id | channel_max | queue | routing_key
+       | result | if_empty | exchange | ticket
+       | routing_key | client_properties | requeue | exchange
+       | message_count | locale | reply_text | delivery_tag
+       | active | active | redelivered | consume_rate
+       | no_local | nowait | mandatory | known_hosts
+       | durable | nowait | redelivered | virtual_host
+       | operation | frame_max | auto_delete | global
+       | delivery_tag | nowait | nowait | method_id
+       | mandatory | mechanisms | exchange | consumer_tag
+       | exchange | class_id | response | consumer_tag
+       | exchange | prefetch_size | exchange | integer_result
+       | queue | passive | meta_data | passive
+       | exchange | capabilities | reply_code | insist
+       | internal | ticket | requeue | consumer_tag
+       | consumer_tag | reply_text | operation | write
+       | global | exclusive | delivery_tag | locales
+       | no_ack | immediate | string_result | ticket
+       | consumer_tag | delivery_tag | routing_key | if_unused
+       | requeue | out_of_band | exclusive | reply_code
+       | exclusive | staged_size | multiple | immediate
+       | nowait | routing_key | nowait | type
+       | nowait | arguments | ticket | ticket
+       | ticket | integer_1 | durable | consumer_tag
+       | queue | routing_key | routing_key | ticket
+       | delivery_tag | queue | channel_max | result
+       | reply_text | identifier | identifier | queue
+       | ticket | auto_delete | consumer_count | queue
+       | reply_text | exclusive | nowait | ticket
+       | message_count | realm | string_1 | arguments
+       | routing_key | redelivered )).
 -type(amqp_property_record() ::
        ( #'P_connection'{} | #'P_channel'{} | #'P_access'{} | #'P_exchange'{}
        | #'P_queue'{} | #'P_basic'{} | #'P_file'{} | #'P_stream'{}
@@ -216,12 +216,17 @@
        ( 100 | 70 | 40 | 10
        | 110 | 80 | 50 | 20
        | 120 | 90 | 60 | 30 )).
+-type(amqp_class_name() ::
+       ( 'connection' | 'channel' | 'access' | 'exchange'
+       | 'queue' | 'basic' | 'file' | 'stream'
+       | 'tx' | 'dtx' | 'tunnel' | 'test' )).
 -endif. % use_specs
 
 %% Method signatures
 -ifdef(use_specs).
 -spec(version/0 :: () -> {non_neg_integer(), non_neg_integer(), non_neg_integer()}).
 -spec(lookup_method_name/1 :: (amqp_method()) -> amqp_method_name()).
+-spec(lookup_class_name/1 :: (amqp_class_id()) -> amqp_class_name()).
 -spec(method_id/1 :: (amqp_method_name()) -> amqp_method()).
 -spec(method_has_content/1 :: (amqp_method_name()) -> boolean()).
 -spec(is_method_synchronous/1 :: (amqp_method_record()) -> boolean()).
@@ -245,6 +250,27 @@ shortstr_size(S) ->
         Len when Len =< 255 -> Len;
         _                   -> exit(method_field_shortstr_overflow)
     end.
+
+-define(SHORTSTR_PROP(P, R, L, S, X),
+        if P =:= 0 -> {undefined, R};
+           true    -> <<L:8/unsigned, S:L/binary, X/binary>> = R,
+                      {S, X}
+        end).
+-define(TABLE_PROP(P, R, L, T, X),
+        if P =:= 0 -> {undefined, R};
+           true    -> <<L:32/unsigned, T:L/binary, X/binary>> = R,
+                      {rabbit_binary_parser:parse_table(T), X}
+        end).
+-define(OCTET_PROP(P, R, I, X),
+        if P =:= 0 -> {undefined, R};
+           true    -> <<I:8/unsigned, X/binary>> = R,
+                      {I, X}
+        end).
+-define(TIMESTAMP_PROP(P, R, I, X),
+        if P =:= 0 -> {undefined, R};
+           true    -> <<I:64/unsigned, X/binary>> = R,
+                      {I, X}
+        end).
 
 version() -> {0, 8, 0}.
 lookup_method_name({10, 10}) -> 'connection.start';
@@ -1079,41 +1105,62 @@ decode_method_fields('test.content_ok', <<F0:32/unsigned>>) ->
   #'test.content_ok'{content_checksum = F0};
 decode_method_fields(Name, BinaryFields) ->
   rabbit_misc:frame_error(Name, BinaryFields).
-decode_properties(10, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(10, _) ->
   #'P_connection'{};
-decode_properties(20, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(20, _) ->
   #'P_channel'{};
-decode_properties(30, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(30, _) ->
   #'P_access'{};
-decode_properties(40, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(40, _) ->
   #'P_exchange'{};
-decode_properties(50, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(50, _) ->
   #'P_queue'{};
-decode_properties(60, PropBin) ->
-  [F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13] = rabbit_binary_parser:parse_properties([shortstr, shortstr, table, octet, octet, shortstr, shortstr, shortstr, shortstr, timestamp, shortstr, shortstr, shortstr, shortstr], PropBin),
+decode_properties(60, <<P0:1, P1:1, P2:1, P3:1, P4:1, P5:1, P6:1, P7:1, P8:1, P9:1, P10:1, P11:1, P12:1, P13:1, _:2, R0/binary>>) ->
+  {F0, R1} = ?SHORTSTR_PROP(P0, R0, L0, S0, X0),
+  {F1, R2} = ?SHORTSTR_PROP(P1, R1, L1, S1, X1),
+  {F2, R3} = ?TABLE_PROP(P2, R2, L2, S2, X2),
+  {F3, R4} = ?OCTET_PROP(P3, R3, I3, X3),
+  {F4, R5} = ?OCTET_PROP(P4, R4, I4, X4),
+  {F5, R6} = ?SHORTSTR_PROP(P5, R5, L5, S5, X5),
+  {F6, R7} = ?SHORTSTR_PROP(P6, R6, L6, S6, X6),
+  {F7, R8} = ?SHORTSTR_PROP(P7, R7, L7, S7, X7),
+  {F8, R9} = ?SHORTSTR_PROP(P8, R8, L8, S8, X8),
+  {F9, R10} = ?TIMESTAMP_PROP(P9, R9, I9, X9),
+  {F10, R11} = ?SHORTSTR_PROP(P10, R10, L10, S10, X10),
+  {F11, R12} = ?SHORTSTR_PROP(P11, R11, L11, S11, X11),
+  {F12, R13} = ?SHORTSTR_PROP(P12, R12, L12, S12, X12),
+  {F13, <<>>} = ?SHORTSTR_PROP(P13, R13, L13, S13, X13),
   #'P_basic'{content_type = F0, content_encoding = F1, headers = F2, delivery_mode = F3, priority = F4, correlation_id = F5, reply_to = F6, expiration = F7, message_id = F8, timestamp = F9, type = F10, user_id = F11, app_id = F12, cluster_id = F13};
-decode_properties(70, PropBin) ->
-  [F0, F1, F2, F3, F4, F5, F6, F7, F8] = rabbit_binary_parser:parse_properties([shortstr, shortstr, table, octet, shortstr, shortstr, shortstr, timestamp, shortstr], PropBin),
+decode_properties(70, <<P0:1, P1:1, P2:1, P3:1, P4:1, P5:1, P6:1, P7:1, P8:1, _:7, R0/binary>>) ->
+  {F0, R1} = ?SHORTSTR_PROP(P0, R0, L0, S0, X0),
+  {F1, R2} = ?SHORTSTR_PROP(P1, R1, L1, S1, X1),
+  {F2, R3} = ?TABLE_PROP(P2, R2, L2, S2, X2),
+  {F3, R4} = ?OCTET_PROP(P3, R3, I3, X3),
+  {F4, R5} = ?SHORTSTR_PROP(P4, R4, L4, S4, X4),
+  {F5, R6} = ?SHORTSTR_PROP(P5, R5, L5, S5, X5),
+  {F6, R7} = ?SHORTSTR_PROP(P6, R6, L6, S6, X6),
+  {F7, R8} = ?TIMESTAMP_PROP(P7, R7, I7, X7),
+  {F8, <<>>} = ?SHORTSTR_PROP(P8, R8, L8, S8, X8),
   #'P_file'{content_type = F0, content_encoding = F1, headers = F2, priority = F3, reply_to = F4, message_id = F5, filename = F6, timestamp = F7, cluster_id = F8};
-decode_properties(80, PropBin) ->
-  [F0, F1, F2, F3, F4] = rabbit_binary_parser:parse_properties([shortstr, shortstr, table, octet, timestamp], PropBin),
+decode_properties(80, <<P0:1, P1:1, P2:1, P3:1, P4:1, _:11, R0/binary>>) ->
+  {F0, R1} = ?SHORTSTR_PROP(P0, R0, L0, S0, X0),
+  {F1, R2} = ?SHORTSTR_PROP(P1, R1, L1, S1, X1),
+  {F2, R3} = ?TABLE_PROP(P2, R2, L2, S2, X2),
+  {F3, R4} = ?OCTET_PROP(P3, R3, I3, X3),
+  {F4, <<>>} = ?TIMESTAMP_PROP(P4, R4, I4, X4),
   #'P_stream'{content_type = F0, content_encoding = F1, headers = F2, priority = F3, timestamp = F4};
-decode_properties(90, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(90, _) ->
   #'P_tx'{};
-decode_properties(100, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(100, _) ->
   #'P_dtx'{};
-decode_properties(110, PropBin) ->
-  [F0, F1, F2, F3, F4] = rabbit_binary_parser:parse_properties([table, shortstr, shortstr, octet, octet], PropBin),
+decode_properties(110, <<P0:1, P1:1, P2:1, P3:1, P4:1, _:11, R0/binary>>) ->
+  {F0, R1} = ?TABLE_PROP(P0, R0, L0, S0, X0),
+  {F1, R2} = ?SHORTSTR_PROP(P1, R1, L1, S1, X1),
+  {F2, R3} = ?SHORTSTR_PROP(P2, R2, L2, S2, X2),
+  {F3, R4} = ?OCTET_PROP(P3, R3, I3, X3),
+  {F4, <<>>} = ?OCTET_PROP(P4, R4, I4, X4),
   #'P_tunnel'{headers = F0, proxy_name = F1, data_name = F2, durable = F3, broadcast = F4};
-decode_properties(120, PropBin) ->
-  [] = rabbit_binary_parser:parse_properties([], PropBin),
+decode_properties(120, _) ->
   #'P_test'{};
 decode_properties(ClassId, _BinaryFields) -> exit({unknown_class_id, ClassId}).
 encode_method_fields(#'connection.start'{version_major = F0, version_minor = F1, server_properties = F2, mechanisms = F3, locales = F4}) ->

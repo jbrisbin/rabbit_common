@@ -85,6 +85,15 @@
                      rabbit_types:ok_or_error2(
                        rabbit_net:socket(), any()))) -> no_return()).
 
+-spec(mainloop/2 :: (_,#v1{}) -> any()).
+-spec(system_code_change/4 :: (_,_,_,_) -> {'ok',_}).
+-spec(system_continue/3 :: (_,_,#v1{}) -> any()).
+-spec(system_terminate/4 :: (_,_,_,_) -> none()).
+
+-spec(process_channel_frame/5 ::
+        (rabbit_command_assembler:frame(), pid(), non_neg_integer(), pid(),
+         tuple()) -> tuple()).
+
 -endif.
 
 %%--------------------------------------------------------------------------
@@ -190,34 +199,32 @@ start_connection(Parent, ChannelSupSupPid, Collector, StartHeartbeatFun, Deb,
     ClientSock = socket_op(Sock, SockTransform),
     erlang:send_after(?HANDSHAKE_TIMEOUT * 1000, self(),
                       handshake_timeout),
+    State = #v1{parent              = Parent,
+                sock                = ClientSock,
+                connection          = #connection{
+                  protocol           = none,
+                  user               = none,
+                  timeout_sec        = ?HANDSHAKE_TIMEOUT,
+                  frame_max          = ?FRAME_MIN_SIZE,
+                  vhost              = none,
+                  client_properties  = none,
+                  capabilities       = []},
+                callback            = uninitialized_callback,
+                recv_len            = 0,
+                pending_recv        = false,
+                connection_state    = pre_init,
+                queue_collector     = Collector,
+                heartbeater         = none,
+                channel_sup_sup_pid = ChannelSupSupPid,
+                start_heartbeat_fun = StartHeartbeatFun,
+                buf                 = [],
+                buf_len             = 0,
+                auth_mechanism      = none,
+                auth_state          = none},
     try
-        recvloop(Deb, switch_callback(
-                        #v1{parent              = Parent,
-                            sock                = ClientSock,
-                            connection          = #connection{
-                              protocol           = none,
-                              user               = none,
-                              timeout_sec        = ?HANDSHAKE_TIMEOUT,
-                              frame_max          = ?FRAME_MIN_SIZE,
-                              vhost              = none,
-                              client_properties  = none,
-                              capabilities       = []},
-                            callback            = uninitialized_callback,
-                            recv_len            = 0,
-                            pending_recv        = false,
-                            connection_state    = pre_init,
-                            queue_collector     = Collector,
-                            heartbeater         = none,
-                            stats_timer         =
-                                rabbit_event:init_stats_timer(),
-                            channel_sup_sup_pid = ChannelSupSupPid,
-                            start_heartbeat_fun = StartHeartbeatFun,
-                            buf                 = [],
-                            buf_len             = 0,
-                            auth_mechanism      = none,
-                            auth_state          = none
-                           },
-                        handshake, 8))
+        recvloop(Deb, switch_callback(rabbit_event:init_stats_timer(
+                                       State, #v1.stats_timer),
+                                      handshake, 8))
     catch
         Ex -> (if Ex == connection_closed_abruptly ->
                        fun rabbit_log:warning/2;
@@ -493,20 +500,7 @@ handle_frame(Type, Channel, Payload,
                                   AnalyzedFrame, self(),
                                   Channel, ChPid, FramingState),
                     put({channel, Channel}, {ChPid, NewAState}),
-                    case AnalyzedFrame of
-                        {method, 'channel.close_ok', _} ->
-                            channel_cleanup(ChPid),
-                            State;
-                        {method, MethodName, _} ->
-                            case (State#v1.connection_state =:= blocking
-                                  andalso
-                                  Protocol:method_has_content(MethodName)) of
-                                true  -> State#v1{connection_state = blocked};
-                                false -> State
-                            end;
-                        _ ->
-                            State
-                    end;
+                    post_process_frame(AnalyzedFrame, ChPid, State);
                 undefined ->
                     case ?IS_RUNNING(State) of
                         true  -> send_to_new_channel(
@@ -517,6 +511,23 @@ handle_frame(Type, Channel, Payload,
                     end
             end
     end.
+
+post_process_frame({method, 'channel.close_ok', _}, ChPid, State) ->
+    channel_cleanup(ChPid),
+    State;
+post_process_frame({method, MethodName, _}, _ChPid,
+                   State = #v1{connection = #connection{
+                                 protocol = Protocol}}) ->
+    case Protocol:method_has_content(MethodName) of
+        true  -> erlang:bump_reductions(2000),
+                 case State#v1.connection_state of
+                     blocking -> State#v1{connection_state = blocked};
+                     _        -> State
+                 end;
+        false -> State
+    end;
+post_process_frame(_Frame, _ChPid, State) ->
+    State.
 
 handle_input(frame_header, <<Type:8,Channel:16,PayloadSize:32>>, State) ->
     ensure_stats_timer(
@@ -592,10 +603,8 @@ refuse_connection(Sock, Exception) ->
     ok = inet_op(fun () -> rabbit_net:send(Sock, <<"AMQP",0,0,9,1>>) end),
     throw(Exception).
 
-ensure_stats_timer(State = #v1{stats_timer = StatsTimer,
-                               connection_state = running}) ->
-    State#v1{stats_timer = rabbit_event:ensure_stats_timer(
-                             StatsTimer, self(), emit_stats)};
+ensure_stats_timer(State = #v1{connection_state = running}) ->
+    rabbit_event:ensure_stats_timer(State, #v1.stats_timer, emit_stats);
 ensure_stats_timer(State) ->
     State.
 
@@ -682,8 +691,7 @@ handle_method0(#'connection.open'{virtual_host = VHostPath},
                            connection = Connection = #connection{
                                           user = User,
                                           protocol = Protocol},
-                           sock = Sock,
-                           stats_timer = StatsTimer}) ->
+                           sock = Sock}) ->
     ok = rabbit_access_control:check_vhost_access(User, VHostPath),
     NewConnection = Connection#connection{vhost = VHostPath},
     ok = send_on_channel0(Sock, #'connection.open_ok'{}, Protocol),
@@ -694,7 +702,7 @@ handle_method0(#'connection.open'{virtual_host = VHostPath},
     rabbit_event:notify(connection_created,
                         [{type, network} |
                          infos(?CREATION_EVENT_KEYS, State1)]),
-    rabbit_event:if_enabled(StatsTimer,
+    rabbit_event:if_enabled(State1, #v1.stats_timer,
                             fun() -> emit_stats(State1) end),
     State1;
 handle_method0(#'connection.close'{}, State) when ?IS_RUNNING(State) ->
@@ -924,6 +932,6 @@ send_exception(State = #v1{connection = #connection{protocol = Protocol}},
            State1#v1.sock, 0, CloseMethod, Protocol),
     State1.
 
-emit_stats(State = #v1{stats_timer = StatsTimer}) ->
+emit_stats(State) ->
     rabbit_event:notify(connection_stats, infos(?STATISTICS_KEYS, State)),
-    State#v1{stats_timer = rabbit_event:reset_stats_timer(StatsTimer)}.
+    rabbit_event:reset_stats_timer(State, #v1.stats_timer).

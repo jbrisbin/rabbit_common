@@ -22,10 +22,8 @@
 -type(attempt_recovery() :: boolean()).
 -type(purged_msg_count() :: non_neg_integer()).
 -type(confirm_required() :: boolean()).
--type(message_properties_transformer() ::
-        fun ((rabbit_types:message_properties())
-             -> rabbit_types:message_properties())).
 -type(async_callback() :: fun ((atom(), fun ((atom(), state()) -> state())) -> 'ok')).
+-type(duration() :: ('undefined' | 'infinity' | number())).
 
 -spec(start/1 :: ([rabbit_amqqueue:name()]) -> 'ok').
 -spec(stop/0 :: () -> 'ok').
@@ -50,13 +48,13 @@
 -spec(fetch/2 :: (true,  state()) -> {fetch_result(ack()), state()};
                  (false, state()) -> {fetch_result(undefined), state()}).
 -spec(ack/2 :: ([ack()], state()) -> {[rabbit_guid:guid()], state()}).
--spec(requeue/3 :: ([ack()], message_properties_transformer(), state())
+-spec(requeue/2 :: ([ack()], state())
                    -> {[rabbit_guid:guid()], state()}).
 -spec(len/1 :: (state()) -> non_neg_integer()).
 -spec(is_empty/1 :: (state()) -> boolean()).
 -spec(set_ram_duration_target/2 ::
-      (('undefined' | 'infinity' | number()), state()) -> state()).
--spec(ram_duration/1 :: (state()) -> {number(), state()}).
+      (duration(), state()) -> state()).
+-spec(ram_duration/1 :: (state()) -> {duration(), state()}).
 -spec(needs_timeout/1 :: (state()) -> 'false' | 'timed' | 'idle').
 -spec(timeout/1 :: (state()) -> state()).
 -spec(handle_pre_hibernate/1 :: (state()) -> state()).
