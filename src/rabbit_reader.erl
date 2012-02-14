@@ -281,7 +281,7 @@ handle_other({conserve_memory, Conserve}, Deb, State) ->
 handle_other({channel_closing, ChPid}, Deb, State) ->
     ok = rabbit_channel:ready_for_close(ChPid),
     channel_cleanup(ChPid),
-    mainloop(Deb, State);
+    mainloop(Deb, maybe_close(State));
 handle_other({'EXIT', Parent, Reason}, _Deb, State = #v1{parent = Parent}) ->
     terminate(io_lib:format("broker forced connection closure "
                             "with reason '~w'", [Reason]), State),
@@ -329,9 +329,13 @@ handle_other({'$gen_call', From, {info, Items}}, Deb, State) ->
                            catch Error -> {error, Error}
                            end),
     mainloop(Deb, State);
-handle_other({'$gen_cast', force_event_refresh}, Deb, State) ->
+handle_other({'$gen_cast', force_event_refresh}, Deb, State)
+  when ?IS_RUNNING(State) ->
     rabbit_event:notify(connection_created,
                         [{type, network} | infos(?CREATION_EVENT_KEYS, State)]),
+    mainloop(Deb, State);
+handle_other({'$gen_cast', force_event_refresh}, Deb, State) ->
+    %% Ignore, we will emit a created event once we start running.
     mainloop(Deb, State);
 handle_other(emit_stats, Deb, State) ->
     mainloop(Deb, emit_stats(State));
