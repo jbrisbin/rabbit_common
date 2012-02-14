@@ -16,8 +16,13 @@ checking turned on and the source code edited to eliminate warnings. It should b
 unaltered source code. The community branch is simply a tweak to allow projects that depend on rabbit_common 
 and also have strict compilation options turned on with this project introducing warnings into those projects.
 
-		This package, the RabbitMQ server is licensed under the MPL. For the
-		MPL, please see LICENSE-MPL-RabbitMQ.
+To use the "community" branch in your project, which includes stricter compilation settings, add "-community" 
+to the version tag:
 
-		If you have any questions regarding licensing, please contact us at
-		info@rabbitmq.com.
+		{deps, [
+			{rabbit_common, ".*", {git, "git://github.com/jbrisbin/rabbit_common.git", "rabbitmq_2.7.1-community"}}
+		]}.
+
+### License 
+
+This package, just like the the RabbitMQ server, is licensed under the MPL. For the MPL, please see LICENSE-MPL-RabbitMQ.
