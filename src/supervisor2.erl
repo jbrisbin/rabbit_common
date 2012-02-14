@@ -660,22 +660,22 @@ terminate_simple_children(Child, Dynamics, SupName) ->
     {Replies, Timedout} =
         lists:foldl(
           fun (_Pid, {Replies, Timedout}) ->
-                  {Reply, Timedout1} =
+                  {Reply, ChildPid, Timedout1} =
                       receive
                           TimeoutMsg ->
                               Remaining = Pids -- [P || {P, _} <- Replies],
                               [exit(P, kill) || P <- Remaining],
                               receive {'DOWN', _MRef, process, Pid, Reason} ->
-                                      {{error, Reason}, true}
+                                      {{error, Reason}, Pid, true}
                               end;
                           {'DOWN', _MRef, process, Pid, Reason} ->
-                              {child_res(Child, Reason, Timedout), Timedout};
+                              {child_res(Child, Reason, Timedout), Pid, Timedout};
                           {'EXIT', Pid, Reason} ->
                               receive {'DOWN', _MRef, process, Pid, _} ->
-                                      {{error, Reason}, Timedout}
+                                      {{error, Reason}, Pid, Timedout}
                               end
                       end,
-                  {[{Pid, Reply} | Replies], Timedout1}
+                  {[{ChildPid, Reply} | Replies], Timedout1}
           end, {[], false}, Pids),
     timeout_stop(Child, TRef, TimeoutMsg, Timedout),
     ReportError = shutdown_error_reporter(SupName),

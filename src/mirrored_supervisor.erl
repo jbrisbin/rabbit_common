@@ -122,8 +122,12 @@
 
 -export([behaviour_info/1]).
 
+%% Both GEN_SERVER and SUPERVISOR require init/1, which cause a compilation
+%% conflict. As these are merely module attributes and all of the functions are
+%% available _already_ one attribute has been disabled. There's no change to the
+%% functionality of the module.
 -behaviour(?GEN_SERVER).
--behaviour(?SUPERVISOR).
+% -behaviour(?SUPERVISOR).
 
 -export([init/1, handle_call/3, handle_info/2, terminate/2, code_change/3,
          handle_cast/2]).
