@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
+%% Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
 %%
 
 -module(rabbit_backing_queue).
@@ -95,15 +95,23 @@ behaviour_info(callbacks) ->
      {drain_confirmed, 1},
 
      %% Drop messages from the head of the queue while the supplied
-     %% predicate returns true.
-     {dropwhile, 2},
+     %% predicate returns true. A callback function is supplied
+     %% allowing callers access to messages that are about to be
+     %% dropped.
+     {dropwhile, 3},
 
      %% Produce the next message.
      {fetch, 2},
 
      %% Acktags supplied are for messages which can now be forgotten
-     %% about. Must return 1 msg_id per Ack, in the same order as Acks.
+     %% about. Must return 1 msg_id per Ack, in the same order as
+     %% Acks.
      {ack, 2},
+
+     %% Acktags supplied are for messages which should be
+     %% processed. The provided callback function is called with each
+     %% message.
+     {fold, 3},
 
      %% Reinsert messages into the queue which have already been
      %% delivered and were pending acknowledgement.

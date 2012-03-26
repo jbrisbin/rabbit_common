@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2011 VMware, Inc.  All rights reserved.
+%% Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
 %%
 
 -type(fetch_result(Ack) ::
@@ -24,6 +24,8 @@
 -type(confirm_required() :: boolean()).
 -type(async_callback() :: fun ((atom(), fun ((atom(), state()) -> state())) -> 'ok')).
 -type(duration() :: ('undefined' | 'infinity' | number())).
+
+-type(msg_fun() :: fun((rabbit_types:basic_message(), ack()) -> 'ok')).
 
 -spec(start/1 :: ([rabbit_amqqueue:name()]) -> 'ok').
 -spec(stop/0 :: () -> 'ok').
@@ -42,12 +44,14 @@
                               rabbit_types:message_properties(), pid(), state())
                              -> {undefined, state()}).
 -spec(drain_confirmed/1 :: (state()) -> {[rabbit_guid:guid()], state()}).
--spec(dropwhile/2 ::
-        (fun ((rabbit_types:message_properties()) -> boolean()), state())
+-spec(dropwhile/3 ::
+        (fun ((rabbit_types:message_properties()) -> boolean()),
+             msg_fun() | 'undefined', state())
         -> state()).
 -spec(fetch/2 :: (true,  state()) -> {fetch_result(ack()), state()};
                  (false, state()) -> {fetch_result(undefined), state()}).
 -spec(ack/2 :: ([ack()], state()) -> {[rabbit_guid:guid()], state()}).
+-spec(fold/3 :: (msg_fun(), state(), [ack()]) -> state()).
 -spec(requeue/2 :: ([ack()], state())
                    -> {[rabbit_guid:guid()], state()}).
 -spec(len/1 :: (state()) -> non_neg_integer()).
