@@ -36,9 +36,9 @@
              conn_name, limiter, tx_status, next_tag, unacked_message_q,
              uncommitted_message_q, uncommitted_acks, uncommitted_nacks, user,
              virtual_host, most_recently_declared_queue, queue_monitors,
-             consumer_mapping, blocking, queue_consumers, queue_collector_pid,
-             stats_timer, confirm_enabled, publish_seqno, unconfirmed_mq,
-             unconfirmed_qm, confirmed, capabilities, trace_state}).
+             consumer_mapping, blocking, queue_consumers, delivering_queues,
+             queue_collector_pid, stats_timer, confirm_enabled, publish_seqno,
+             unconfirmed, confirmed, capabilities, trace_state}).
 
 -define(MAX_PERMISSION_CACHE_SIZE, 12).
 
@@ -194,15 +194,15 @@ init([Channel, ReaderPid, WriterPid, ConnPid, ConnName, Protocol, User, VHost,
                 user                    = User,
                 virtual_host            = VHost,
                 most_recently_declared_queue = <<>>,
-                queue_monitors          = sets:new(),
+                queue_monitors          = pmon:new(),
                 consumer_mapping        = dict:new(),
                 blocking                = sets:new(),
                 queue_consumers         = dict:new(),
+                delivering_queues       = sets:new(),
                 queue_collector_pid     = CollectorPid,
                 confirm_enabled         = false,
                 publish_seqno           = 1,
-                unconfirmed_mq          = gb_trees:empty(),
-                unconfirmed_qm          = gb_trees:empty(),
+                unconfirmed             = dtree:empty(),
                 confirmed               = [],
                 capabilities            = Capabilities,
                 trace_state             = rabbit_trace:init(VHost)},
@@ -332,10 +332,11 @@ handle_info({'DOWN', _MRef, process, QPid, Reason}, State) ->
     State1 = handle_publishing_queue_down(QPid, Reason, State),
     State2 = queue_blocked(QPid, State1),
     State3 = handle_consuming_queue_down(QPid, State2),
+    State4 = handle_delivering_queue_down(QPid, State3),
     credit_flow:peer_down(QPid),
     erase_queue_stats(QPid),
-    noreply(State3#ch{queue_monitors =
-                          sets:del_element(QPid, State3#ch.queue_monitors)});
+    noreply(State3#ch{queue_monitors = pmon:erase(
+                                         QPid, State4#ch.queue_monitors)});
 
 handle_info({'EXIT', _Pid, Reason}, State) ->
     {stop, Reason, State}.
@@ -548,45 +549,9 @@ record_confirms(MXs, State = #ch{confirmed = C}) ->
 
 confirm([], _QPid, State) ->
     State;
-confirm(MsgSeqNos, QPid, State) ->
-    {MXs, State1} = process_confirms(MsgSeqNos, QPid, false, State),
-    record_confirms(MXs, State1).
-
-process_confirms(MsgSeqNos, QPid, Nack, State) ->
-    lists:foldl(
-      fun(MsgSeqNo, {_MXs, _State = #ch{unconfirmed_mq = UMQ0}} = Acc) ->
-              case gb_trees:lookup(MsgSeqNo, UMQ0) of
-                  {value, XQ} -> remove_unconfirmed(MsgSeqNo, QPid, XQ,
-                                                    Acc, Nack);
-                  none        -> Acc
-              end
-      end, {[], State}, MsgSeqNos).
-
-remove_unconfirmed(MsgSeqNo, QPid, {XName, Qs},
-                   {MXs, State = #ch{unconfirmed_mq = UMQ,
-                                     unconfirmed_qm = UQM}},
-                   Nack) ->
-    State1 = case gb_trees:lookup(QPid, UQM) of
-                 {value, MsgSeqNos} ->
-                     MsgSeqNos1 = gb_sets:delete(MsgSeqNo, MsgSeqNos),
-                     case gb_sets:is_empty(MsgSeqNos1) of
-                         true  -> UQM1 = gb_trees:delete(QPid, UQM),
-                                  State#ch{unconfirmed_qm = UQM1};
-                         false -> UQM1 = gb_trees:update(QPid, MsgSeqNos1, UQM),
-                                  State#ch{unconfirmed_qm = UQM1}
-                     end;
-                 none ->
-                     State
-             end,
-    Qs1 = gb_sets:del_element(QPid, Qs),
-    %% If QPid somehow died initiating a nack, clear the message from
-    %% internal data-structures.  Also, cleanup empty entries.
-    case (Nack orelse gb_sets:is_empty(Qs1)) of
-        true  -> UMQ1 = gb_trees:delete(MsgSeqNo, UMQ),
-                 {[{MsgSeqNo, XName} | MXs], State1#ch{unconfirmed_mq = UMQ1}};
-        false -> UMQ1 = gb_trees:update(MsgSeqNo, {XName, Qs1}, UMQ),
-                 {MXs, State1#ch{unconfirmed_mq = UMQ1}}
-    end.
+confirm(MsgSeqNos, QPid, State = #ch{unconfirmed = UC}) ->
+    {MXs, UC1} = dtree:take(MsgSeqNos, QPid, UC),
+    record_confirms(MXs, State#ch{unconfirmed = UC1}).
 
 handle_method(#'channel.open'{}, _, State = #ch{state = starting}) ->
     {reply, #'channel.open_ok'{}, State#ch{state = running}};
@@ -694,7 +659,7 @@ handle_method(#'basic.get'{queue = QueueNameBin,
            QueueName, ConnPid,
            fun (Q) -> rabbit_amqqueue:basic_get(Q, self(), NoAck) end) of
         {ok, MessageCount,
-         Msg = {_QName, _QPid, _MsgId, Redelivered,
+         Msg = {_QName, QPid, _MsgId, Redelivered,
                 #basic_message{exchange_name = ExchangeName,
                                routing_keys  = [RoutingKey | _CcRoutes],
                                content       = Content}}} ->
@@ -706,7 +671,8 @@ handle_method(#'basic.get'{queue = QueueNameBin,
                                    routing_key   = RoutingKey,
                                    message_count = MessageCount},
                    Content),
-            {noreply, record_sent(none, not(NoAck), Msg, State)};
+            State1 = monitor_delivering_queue(NoAck, QPid, State),
+            {noreply, record_sent(none, not(NoAck), Msg, State1)};
         empty ->
             {reply, #'basic.get_empty'{}, State}
     end;
@@ -744,10 +710,10 @@ handle_method(#'basic.consume'{queue        = QueueNameBin,
                                        consumer_tag = ActualConsumerTag})),
                             Q}
                    end) of
-                {ok, Q} ->
-                    State1 = State#ch{consumer_mapping =
-                                          dict:store(ActualConsumerTag, Q,
-                                                     ConsumerMapping)},
+                {ok, Q = #amqqueue{pid = QPid}} ->
+                    CM1 = dict:store(ActualConsumerTag, Q, ConsumerMapping),
+                    State1 = monitor_delivering_queue(
+                               NoAck, QPid, State#ch{consumer_mapping = CM1}),
                     {noreply,
                      case NoWait of
                          true  -> consumer_monitor(ActualConsumerTag, State1);
@@ -795,9 +761,7 @@ handle_method(#'basic.cancel'{consumer_tag = ConsumerTag,
                    fun () -> {error, not_found} end,
                    fun () ->
                            rabbit_amqqueue:basic_cancel(
-                             Q, self(), ConsumerTag,
-                             ok_msg(NoWait, #'basic.cancel_ok'{
-                                      consumer_tag = ConsumerTag}))
+                             Q, self(), ConsumerTag, ok_msg(NoWait, OkMsg))
                    end) of
                 ok ->
                     {noreply, NewState};
@@ -974,7 +938,7 @@ handle_method(#'queue.declare'{queue       = QueueNameBin,
         {error, not_found} ->
             case rabbit_amqqueue:declare(QueueName, Durable, AutoDelete,
                                          Args, Owner) of
-                {new, Q = #amqqueue{}} ->
+                {new, #amqqueue{pid = QPid}} ->
                     %% We need to notify the reader within the channel
                     %% process so that we can be sure there are no
                     %% outstanding exclusive queues being declared as
@@ -982,7 +946,7 @@ handle_method(#'queue.declare'{queue       = QueueNameBin,
                     ok = case Owner of
                              none -> ok;
                              _    -> rabbit_queue_collector:register(
-                                       CollectorPid, Q)
+                                       CollectorPid, QPid)
                          end,
                     return_queue_declare_ok(QueueName, NoWait, 0, 0, State);
                 {existing, _Q} ->
@@ -1128,6 +1092,7 @@ handle_method(_MethodRecord, _Content, _State) ->
 
 consumer_monitor(ConsumerTag,
                  State = #ch{consumer_mapping = ConsumerMapping,
+                             queue_monitors   = QMons,
                              queue_consumers  = QCons,
                              capabilities     = Capabilities}) ->
     case rabbit_misc:table_lookup(
@@ -1140,34 +1105,26 @@ consumer_monitor(ConsumerTag,
                                  end,
                                  gb_sets:singleton(ConsumerTag),
                                  QCons),
-            monitor_queue(QPid, State#ch{queue_consumers = QCons1});
+            State#ch{queue_monitors  = pmon:monitor(QPid, QMons),
+                     queue_consumers = QCons1};
         _ ->
             State
     end.
 
-monitor_queue(QPid, State = #ch{queue_monitors = QMons}) ->
-    case sets:is_element(QPid, QMons) of
-        false -> erlang:monitor(process, QPid),
-                 State#ch{queue_monitors = sets:add_element(QPid, QMons)};
-        true  -> State
-    end.
+monitor_delivering_queue(true, _QPid, State) ->
+    State;
+monitor_delivering_queue(false, QPid, State = #ch{queue_monitors    = QMons,
+                                                  delivering_queues = DQ}) ->
+    State#ch{queue_monitors    = pmon:monitor(QPid, QMons),
+             delivering_queues = sets:add_element(QPid, DQ)}.
 
-handle_publishing_queue_down(QPid, Reason, State = #ch{unconfirmed_qm = UQM}) ->
-    MsgSeqNos = case gb_trees:lookup(QPid, UQM) of
-                    {value, MsgSet} -> gb_sets:to_list(MsgSet);
-                    none            -> []
-                end,
-    %% We remove the MsgSeqNos from UQM before calling
-    %% process_confirms to prevent each MsgSeqNo being removed from
-    %% the set one by one which which would be inefficient
-    State1 = State#ch{unconfirmed_qm = gb_trees:delete_any(QPid, UQM)},
-    {Nack, SendFun} =
-        case rabbit_misc:is_abnormal_termination(Reason) of
-            true  -> {true,  fun send_nacks/2};
-            false -> {false, fun record_confirms/2}
-        end,
-    {MXs, State2} = process_confirms(MsgSeqNos, QPid, Nack, State1),
-    SendFun(MXs, State2).
+handle_publishing_queue_down(QPid, Reason, State = #ch{unconfirmed = UC}) ->
+    case rabbit_misc:is_abnormal_termination(Reason) of
+        true  -> {MXs, UC1} = dtree:take_all(QPid, UC),
+                 send_nacks(MXs, State#ch{unconfirmed = UC1});
+        false -> {MXs, UC1} = dtree:take(QPid, UC),
+                 record_confirms(MXs, State#ch{unconfirmed = UC1})
+    end.
 
 handle_consuming_queue_down(QPid,
                             State = #ch{consumer_mapping = ConsumerMapping,
@@ -1186,6 +1143,9 @@ handle_consuming_queue_down(QPid,
                      end, ConsumerMapping, ConsumerTags),
     State#ch{consumer_mapping = ConsumerMapping1,
              queue_consumers  = dict:erase(QPid, QCons)}.
+
+handle_delivering_queue_down(QPid, State = #ch{delivering_queues = DQ}) ->
+    State#ch{delivering_queues = sets:del_element(QPid, DQ)}.
 
 binding_action(Fun, ExchangeNameBin, DestinationType, DestinationNameBin,
                RoutingKey, Arguments, ReturnMethod, NoWait,
@@ -1322,9 +1282,11 @@ new_tx(State) -> State#ch{uncommitted_message_q = queue:new(),
 
 notify_queues(State = #ch{state = closing}) ->
     {ok, State};
-notify_queues(State = #ch{consumer_mapping = Consumers}) ->
-    {rabbit_amqqueue:notify_down_all(consumer_queues(Consumers), self()),
-     State#ch{state = closing}}.
+notify_queues(State = #ch{consumer_mapping  = Consumers,
+                          delivering_queues = DQ }) ->
+    QPids = sets:to_list(
+              sets:union(sets:from_list(consumer_queues(Consumers)), DQ)),
+    {rabbit_amqqueue:notify_down_all(QPids, self()), State#ch{state = closing}}.
 
 fold_per_queue(_F, Acc, []) ->
     Acc;
@@ -1370,7 +1332,9 @@ deliver_to_queues({Delivery = #delivery{message    = Message = #basic_message{
                    QNames}, State) ->
     {RoutingRes, DeliveredQPids} =
         rabbit_amqqueue:deliver_flow(rabbit_amqqueue:lookup(QNames), Delivery),
-    State1 = lists:foldl(fun monitor_queue/2, State, DeliveredQPids),
+    State1 = State#ch{queue_monitors =
+                          pmon:monitor_all(DeliveredQPids,
+                                           State#ch.queue_monitors)},
     State2 = process_routing_result(RoutingRes, DeliveredQPids,
                                     XName, MsgSeqNo, Message, State1),
     maybe_incr_stats([{XName, 1} |
@@ -1392,30 +1356,16 @@ process_routing_result(routed,       [], XName,  MsgSeqNo,   _, State) ->
 process_routing_result(routed,        _,     _, undefined,   _, State) ->
     State;
 process_routing_result(routed,    QPids, XName,  MsgSeqNo,   _, State) ->
-    #ch{unconfirmed_mq = UMQ} = State,
-    UMQ1 = gb_trees:insert(MsgSeqNo, {XName, gb_sets:from_list(QPids)}, UMQ),
-    SingletonSet = gb_sets:singleton(MsgSeqNo),
-    lists:foldl(
-      fun (QPid, State0 = #ch{unconfirmed_qm = UQM}) ->
-              case gb_trees:lookup(QPid, UQM) of
-                  {value, MsgSeqNos} ->
-                      MsgSeqNos1 = gb_sets:insert(MsgSeqNo, MsgSeqNos),
-                      UQM1 = gb_trees:update(QPid, MsgSeqNos1, UQM),
-                      State0#ch{unconfirmed_qm = UQM1};
-                  none ->
-                      UQM1 = gb_trees:insert(QPid, SingletonSet, UQM),
-                      State0#ch{unconfirmed_qm = UQM1}
-              end
-      end, State#ch{unconfirmed_mq = UMQ1}, QPids).
+    State#ch{unconfirmed = dtree:insert(MsgSeqNo, QPids, XName,
+                                        State#ch.unconfirmed)}.
 
 send_nacks([], State) ->
     State;
 send_nacks(MXs, State = #ch{tx_status = none}) ->
-    MsgSeqNos = [ MsgSeqNo || {MsgSeqNo, _} <- MXs ],
-    coalesce_and_send(MsgSeqNos,
+    coalesce_and_send([MsgSeqNo || {MsgSeqNo, _} <- MXs],
                       fun(MsgSeqNo, Multiple) ->
                               #'basic.nack'{delivery_tag = MsgSeqNo,
-                                            multiple = Multiple}
+                                            multiple     = Multiple}
                       end, State);
 send_nacks(_, State) ->
     maybe_complete_tx(State#ch{tx_status = failed}).
@@ -1445,11 +1395,11 @@ send_confirms(Cs, State) ->
                           end, State).
 
 coalesce_and_send(MsgSeqNos, MkMsgFun,
-                  State = #ch{writer_pid = WriterPid, unconfirmed_mq = UMQ}) ->
+                  State = #ch{writer_pid = WriterPid, unconfirmed = UC}) ->
     SMsgSeqNos = lists:usort(MsgSeqNos),
-    CutOff = case gb_trees:is_empty(UMQ) of
+    CutOff = case dtree:is_empty(UC) of
                  true  -> lists:last(SMsgSeqNos) + 1;
-                 false -> {SeqNo, _XQ} = gb_trees:smallest(UMQ), SeqNo
+                 false -> {SeqNo, _XName} = dtree:smallest(UC), SeqNo
              end,
     {Ms, Ss} = lists:splitwith(fun(X) -> X < CutOff end, SMsgSeqNos),
     case Ms of
@@ -1463,8 +1413,8 @@ coalesce_and_send(MsgSeqNos, MkMsgFun,
 
 maybe_complete_tx(State = #ch{tx_status = in_progress}) ->
     State;
-maybe_complete_tx(State = #ch{unconfirmed_mq = UMQ}) ->
-    case gb_trees:is_empty(UMQ) of
+maybe_complete_tx(State = #ch{unconfirmed = UC}) ->
+    case dtree:is_empty(UC) of
         false -> State;
         true  -> complete_tx(State#ch{confirmed = []})
     end.
@@ -1492,8 +1442,8 @@ i(confirm,        #ch{confirm_enabled  = CE})      -> CE;
 i(name,           State)                           -> name(State);
 i(consumer_count, #ch{consumer_mapping = ConsumerMapping}) ->
     dict:size(ConsumerMapping);
-i(messages_unconfirmed, #ch{unconfirmed_mq = UMQ}) ->
-    gb_trees:size(UMQ);
+i(messages_unconfirmed, #ch{unconfirmed = UC}) ->
+    dtree:size(UC);
 i(messages_unacknowledged, #ch{unacked_message_q = UAMQ}) ->
     queue:len(UAMQ);
 i(messages_uncommitted, #ch{uncommitted_message_q = TMQ}) ->

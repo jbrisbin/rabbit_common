@@ -16,7 +16,7 @@
 
 -module(rabbit_nodes).
 
--export([names/1, diagnostics/1, make/1, parts/1, cookie_hash/0]).
+-export([names/1, diagnostics/1, make/1, parts/1, cookie_hash/0, is_running/2]).
 
 -define(EPMD_TIMEOUT, 30000).
 
@@ -32,6 +32,7 @@
 -spec(make/1 :: ({string(), string()} | string()) -> node()).
 -spec(parts/1 :: (node() | string()) -> {string(), string()}).
 -spec(cookie_hash/0 :: () -> string()).
+-spec(is_running/2 :: (node(), atom()) -> boolean()).
 
 -endif.
 
@@ -39,15 +40,15 @@
 
 names(Hostname) ->
     Self = self(),
-    process_flag(trap_exit, true),
-    Pid = spawn_link(fun () -> Self ! {names, net_adm:names(Hostname)} end),
+    Ref = make_ref(),
+    {Pid, MRef} = spawn_monitor(
+                    fun () -> Self ! {Ref, net_adm:names(Hostname)} end),
     timer:exit_after(?EPMD_TIMEOUT, Pid, timeout),
-    Res = receive
-              {names, Names}        -> Names;
-              {'EXIT', Pid, Reason} -> {error, Reason}
-          end,
-    process_flag(trap_exit, false),
-    Res.
+    receive
+        {Ref, Names}                         -> erlang:demonitor(MRef, [flush]),
+                                                Names;
+        {'DOWN', MRef, process, Pid, Reason} -> {error, Reason}
+    end.
 
 diagnostics(Nodes) ->
     Hosts = lists:usort([element(2, parts(Node)) || Node <- Nodes]),
@@ -92,3 +93,9 @@ parts(NodeStr) ->
 
 cookie_hash() ->
     base64:encode_to_string(erlang:md5(atom_to_list(erlang:get_cookie()))).
+
+is_running(Node, Application) ->
+    case rpc:call(Node, application, which_applications, [infinity]) of
+        {badrpc, _} -> false;
+        Apps        -> proplists:is_defined(Application, Apps)
+    end.
