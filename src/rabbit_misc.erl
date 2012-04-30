@@ -46,8 +46,7 @@
 -export([sort_field_table/1]).
 -export([pid_to_string/1, string_to_pid/1]).
 -export([version_compare/2, version_compare/3]).
--export([dict_cons/3, orddict_cons/3, gb_trees_cons/3,
-         gb_trees_set_insert/3]).
+-export([dict_cons/3, orddict_cons/3, gb_trees_cons/3]).
 -export([gb_trees_fold/3, gb_trees_foreach/2]).
 -export([get_options/2]).
 -export([all_module_attributes/1, build_acyclic_graph/3]).
@@ -60,6 +59,8 @@
 -export([append_rpc_all_nodes/4]).
 -export([multi_call/2]).
 -export([quit/1]).
+-export([os_cmd/1]).
+-export([gb_sets_difference/2]).
 
 %%----------------------------------------------------------------------------
 
@@ -176,7 +177,6 @@
 -spec(dict_cons/3 :: (any(), any(), dict()) -> dict()).
 -spec(orddict_cons/3 :: (any(), any(), orddict:orddict()) -> orddict:orddict()).
 -spec(gb_trees_cons/3 :: (any(), any(), gb_tree()) -> gb_tree()).
--spec(gb_trees_set_insert/3 :: (any(), any(), gb_tree()) -> gb_tree()).
 -spec(gb_trees_fold/3 :: (fun ((any(), any(), A) -> A), A, gb_tree()) -> A).
 -spec(gb_trees_foreach/2 ::
         (fun ((any(), any()) -> any()), gb_tree()) -> 'ok').
@@ -204,6 +204,8 @@
 -spec(multi_call/2 ::
         ([pid()], any()) -> {[{pid(), any()}], [{pid(), any()}]}).
 -spec(quit/1 :: (integer() | string()) -> no_return()).
+-spec(os_cmd/1 :: (string()) -> string()).
+-spec(gb_sets_difference/2 :: (gb_set(), gb_set()) -> gb_set()).
 
 -endif.
 
@@ -717,15 +719,6 @@ gb_trees_cons(Key, Value, Tree) ->
         none            -> gb_trees:insert(Key, [Value], Tree)
     end.
 
-gb_trees_set_insert(Key, Value, Tree) ->
-    case gb_trees:lookup(Key, Tree) of
-        {value, Values} ->
-            Values1 = gb_sets:insert(Value, Values),
-            gb_trees:update(Key, Values1, Tree);
-        none ->
-            gb_trees:insert(Key, gb_sets:singleton(Value), Tree)
-    end.
-
 gb_trees_fold(Fun, Acc, Tree) ->
     gb_trees_fold1(Fun, Acc, gb_trees:next(gb_trees:iterator(Tree))).
 
@@ -914,3 +907,13 @@ quit(Status) ->
         {unix,  _} -> halt(Status);
         {win32, _} -> init:stop(Status)
     end.
+
+os_cmd(Command) ->
+    Exec = hd(string:tokens(Command, " ")),
+    case os:find_executable(Exec) of
+        false -> throw({command_not_found, Exec});
+        _     -> os:cmd(Command)
+    end.
+
+gb_sets_difference(S1, S2) ->
+    gb_sets:fold(fun gb_sets:delete_any/2, S1, S2).
