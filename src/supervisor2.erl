@@ -815,7 +815,7 @@ terminate_simple_children(Child, Dynamics, SupName) ->
     TRef = timeout_start(Child, TimeoutMsg),
     {Replies, Timedout} =
         lists:foldl(
-          fun (_Pid, {Replies, Timedout}) ->
+          fun (Pid, {Replies, Timedout}) ->
                   {Reply, Timedout1} =
                       receive
                           TimeoutMsg ->
@@ -826,8 +826,8 @@ terminate_simple_children(Child, Dynamics, SupName) ->
                               end;
                           {'DOWN', _MRef, process, Pid, Reason} ->
                               {child_res(Child, Reason, Timedout), Timedout};
-                          {'EXIT', Pid, Reason} ->
-                              receive {'DOWN', _MRef, process, Pid, _} ->
+                          {'EXIT', ChildPid, Reason} ->
+                              receive {'DOWN', _MRef, process, ChildPid, _} ->
                                       {{error, Reason}, Timedout}
                               end
                       end,
