@@ -166,6 +166,9 @@
         [queue_name, channel_pid, consumer_tag, ack_required]).
 
 start() ->
+    %% Clear out remnants of old incarnation, in case we restarted
+    %% faster than other nodes handled DOWN messages from us.
+    on_node_down(node()),
     DurableQueues = find_durable_queues(),
     {ok, BQ} = application:get_env(rabbit, backing_queue_module),
     ok = BQ:start([QName || #amqqueue{name = QName} <- DurableQueues]),
@@ -284,8 +287,17 @@ with(Name, F, E) ->
     case lookup(Name) of
         {ok, Q = #amqqueue{slave_pids = []}} ->
             rabbit_misc:with_exit_handler(E, fun () -> F(Q) end);
-        {ok, Q} ->
-            E1 = fun () -> timer:sleep(25), with(Name, F, E) end,
+        {ok, Q = #amqqueue{pid = QPid}} ->
+            %% We check is_process_alive(QPid) in case we receive a
+            %% nodedown (for example) in F() that has nothing to do
+            %% with the QPid.
+            E1 = fun () ->
+                         case rabbit_misc:is_process_alive(QPid) of
+                             true  -> E();
+                             false -> timer:sleep(25),
+                                      with(Name, F, E)
+                         end
+                 end,
             rabbit_misc:with_exit_handler(E1, fun () -> F(Q) end);
         {error, not_found} ->
             E()
@@ -536,7 +548,12 @@ flush_all(QPids, ChPid) ->
 
 internal_delete1(QueueName) ->
     ok = mnesia:delete({rabbit_queue, QueueName}),
-    ok = mnesia:delete({rabbit_durable_queue, QueueName}),
+    %% this 'guarded' delete prevents unnecessary writes to the mnesia
+    %% disk log
+    case mnesia:wread({rabbit_durable_queue, QueueName}) of
+        []  -> ok;
+        [_] -> ok = mnesia:delete({rabbit_durable_queue, QueueName})
+    end,
     %% we want to execute some things, as decided by rabbit_exchange,
     %% after the transaction.
     rabbit_binding:remove_for_destination(QueueName).
@@ -573,7 +590,8 @@ on_node_down(Node) ->
                                     #amqqueue{name = QName, pid = Pid,
                                               slave_pids = []}
                                         <- mnesia:table(rabbit_queue),
-                                    node(Pid) == Node])),
+                                    node(Pid) == Node andalso
+                                    not rabbit_misc:is_process_alive(Pid)])),
                 {Qs, Dels} = lists:unzip(QsDels),
                 T = rabbit_binding:process_deletions(
                       lists:foldl(fun rabbit_binding:combine_deletions/2,
@@ -646,13 +664,18 @@ qpids(Qs) -> lists:append([[QPid | SPids] ||
                               #amqqueue{pid = QPid, slave_pids = SPids} <- Qs]).
 
 safe_delegate_call_ok(F, Pids) ->
-    case delegate:invoke(Pids, fun (Pid) ->
-                                       rabbit_misc:with_exit_handler(
-                                         fun () -> ok end,
-                                         fun () -> F(Pid) end)
-                               end) of
-        {_,  []} -> ok;
-        {_, Bad} -> {error, Bad}
+    {_, Bads} = delegate:invoke(Pids, fun (Pid) ->
+                                              rabbit_misc:with_exit_handler(
+                                                fun () -> ok end,
+                                                fun () -> F(Pid) end)
+                                      end),
+    case lists:filter(fun ({_Pid, {exit, {R, _}, _}}) ->
+                              rabbit_misc:is_abnormal_exit(R);
+                          ({_Pid, _}) ->
+                              false
+                      end, Bads) of
+        []    -> ok;
+        Bads1 -> {error, Bads1}
     end.
 
 delegate_call(Pid, Msg) ->
