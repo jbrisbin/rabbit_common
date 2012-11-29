@@ -174,7 +174,7 @@
 -spec start_internal(Group, ChildSpecs) -> Result when
       Group :: group_name(),
       ChildSpecs :: [supervisor2:child_spec()],
-      Result :: supervisor2:startlink_ret().
+      Result :: {'ok', pid()} | {'error', term()}.
 
 -spec create_tables() -> Result when
       Result :: 'ok'.
@@ -264,24 +264,19 @@ start_internal(Group, ChildSpecs) ->
 
 %%----------------------------------------------------------------------------
 
-init({overall, Group, Init}) ->
-    case Init of
-        {ok, {Restart, ChildSpecs}} ->
-            Delegate = {delegate, {?SUPERVISOR, start_link,
-                                   [?MODULE, {delegate, Restart}]},
-                        temporary, 16#ffffffff, supervisor, [?SUPERVISOR]},
-            Mirroring = {mirroring, {?MODULE, start_internal,
-                                     [Group, ChildSpecs]},
-                         permanent, 16#ffffffff, worker, [?MODULE]},
-            %% Important: Delegate MUST start before Mirroring so that
-            %% when we shut down from above it shuts down last, so
-            %% Mirroring does not see it die.
-            %%
-            %% See comment in handle_info('DOWN', ...) below
-            {ok, {{one_for_all, 0, 1}, [Delegate, Mirroring]}};
-        ignore ->
-            ignore
-    end;
+init({overall, _Group, ignore}) -> ignore;
+init({overall,  Group, {ok, {Restart, ChildSpecs}}}) ->
+    %% Important: Delegate MUST start before Mirroring so that when we
+    %% shut down from above it shuts down last, so Mirroring does not
+    %% see it die.
+    %%
+    %% See comment in handle_info('DOWN', ...) below
+    {ok, {{one_for_all, 0, 1},
+          [{delegate, {?SUPERVISOR, start_link, [?MODULE, {delegate, Restart}]},
+            temporary, 16#ffffffff, supervisor, [?SUPERVISOR]},
+           {mirroring, {?MODULE, start_internal, [Group, ChildSpecs]},
+            permanent, 16#ffffffff, worker, [?MODULE]}]}};
+
 
 init({delegate, Restart}) ->
     {ok, {Restart, []}};

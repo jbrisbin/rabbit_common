@@ -57,8 +57,7 @@ diagnostics(Nodes) ->
                   "hosts, their running nodes and ports:", [Nodes]}] ++
         [diagnostics_host(Host) || Host <- Hosts] ++
         diagnostics0(),
-    lists:flatten([io_lib:format(F ++ "~n", A) || NodeDiag <- NodeDiags,
-                                                  {F, A}   <- [NodeDiag]]).
+    rabbit_misc:format_many(lists:flatten(NodeDiags)).
 
 diagnostics0() ->
     [{"~ncurrent node details:~n- node name: ~w", [node()]},
@@ -71,8 +70,8 @@ diagnostics0() ->
 diagnostics_host(Host) ->
     case names(Host) of
         {error, EpmdReason} ->
-            {"- unable to connect to epmd on ~s: ~w",
-             [Host, EpmdReason]};
+            {"- unable to connect to epmd on ~s: ~w (~s)",
+             [Host, EpmdReason, rabbit_misc:format_inet_error(EpmdReason)]};
         {ok, NamePorts} ->
             {"- ~s: ~p",
              [Host, [{list_to_atom(Name), Port} ||
