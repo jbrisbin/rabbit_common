@@ -43,11 +43,12 @@
 -record(resource, {virtual_host, kind, name}).
 
 -record(exchange, {name, type, durable, auto_delete, internal, arguments,
-                   scratch}).
+                   scratches, policy}).
 -record(exchange_serial, {name, next}).
 
 -record(amqqueue, {name, durable, auto_delete, exclusive_owner = none,
-                   arguments, pid, slave_pids, mirror_nodes}).
+                   arguments, pid, slave_pids, sync_slave_pids, policy,
+                   gm_pids}).
 
 %% mnesia doesn't like unary records, so we add a dummy 'value' field
 -record(route, {binding, value = const}).
@@ -66,16 +67,19 @@
 
 -record(listener, {node, protocol, host, ip_address, port}).
 
+-record(runtime_parameters, {key, value}).
+
 -record(basic_message, {exchange_name, routing_keys = [], content, id,
                         is_persistent}).
 
 -record(ssl_socket, {tcp, ssl}).
--record(delivery, {mandatory, immediate, sender, message, msg_seq_no}).
+-record(delivery, {mandatory, sender, message, msg_seq_no}).
 -record(amqp_error, {name, explanation = "", method = none}).
 
 -record(event, {type, props, timestamp}).
 
--record(message_properties, {expiry, needs_confirming = false}).
+-record(message_properties, {expiry, needs_confirming = false,
+                             delivered = false}).
 
 -record(plugin, {name,          %% atom()
                  version,       %% string()
@@ -91,11 +95,21 @@
 -define(PROTOCOL_VERSION, "AMQP 0-9-1 / 0-9 / 0-8").
 -define(ERTS_MINIMUM, "5.6.3").
 
+%% EMPTY_FRAME_SIZE, 8 = 1 + 2 + 4 + 1
+%%  - 1 byte of frame type
+%%  - 2 bytes of channel number
+%%  - 4 bytes of frame payload length
+%%  - 1 byte of payload trailer FRAME_END byte
+%% See rabbit_binary_generator:check_empty_frame_size/0, an assertion
+%% called at startup.
+-define(EMPTY_FRAME_SIZE, 8).
+
 -define(MAX_WAIT, 16#ffffffff).
 
 -define(HIBERNATE_AFTER_MIN,        1000).
 -define(DESIRED_HIBERNATE,         10000).
 -define(CREDIT_DISC_BOUND,   {2000, 500}).
 
+-define(INVALID_HEADERS_KEY, <<"x-invalid-headers">>).
 -define(ROUTING_HEADERS, [<<"CC">>, <<"BCC">>]).
 -define(DELETED_HEADER, <<"BCC">>).
