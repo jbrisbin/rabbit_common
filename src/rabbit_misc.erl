@@ -46,6 +46,7 @@
 -export([sort_field_table/1]).
 -export([pid_to_string/1, string_to_pid/1]).
 -export([version_compare/2, version_compare/3]).
+-export([version_minor_equivalent/2]).
 -export([dict_cons/3, orddict_cons/3, gb_trees_cons/3]).
 -export([gb_trees_fold/3, gb_trees_foreach/2]).
 -export([parse_arguments/3]).
@@ -191,6 +192,7 @@
 -spec(version_compare/3 ::
         (string(), string(), ('lt' | 'lte' | 'eq' | 'gte' | 'gt'))
         -> boolean()).
+-spec(version_minor_equivalent/2 :: (string(), string()) -> boolean()).
 -spec(dict_cons/3 :: (any(), any(), dict()) -> dict()).
 -spec(orddict_cons/3 :: (any(), any(), orddict:orddict()) -> orddict:orddict()).
 -spec(gb_trees_cons/3 :: (any(), any(), gb_tree()) -> gb_tree()).
@@ -237,8 +239,8 @@
 -spec(check_expiry/1 :: (integer()) -> rabbit_types:ok_or_error(any())).
 -spec(base64url/1 :: (binary()) -> string()).
 -spec(interval_operation/4 ::
-        (thunk(A), float(), non_neg_integer(), non_neg_integer())
-        -> {A, non_neg_integer()}).
+        ({atom(), atom(), any()}, float(), non_neg_integer(), non_neg_integer())
+        -> {any(), non_neg_integer()}).
 
 -endif.
 
@@ -734,6 +736,16 @@ version_compare(A,  B) ->
        ANum > BNum   -> gt
     end.
 
+%% a.b.c and a.b.d match, but a.b.c and a.d.e don't. If
+%% versions do not match that pattern, just compare them.
+version_minor_equivalent(A, B) ->
+    {ok, RE} = re:compile("^(\\d+\\.\\d+)(\\.\\d+)\$"),
+    Opts = [{capture, all_but_first, list}],
+    case {re:run(A, RE, Opts), re:run(B, RE, Opts)} of
+        {{match, [A1|_]}, {match, [B1|_]}} -> A1 =:= B1;
+        _                                  -> A =:= B
+    end.
+
 dropdot(A) -> lists:dropwhile(fun (X) -> X =:= $. end, A).
 
 dict_cons(Key, Value, Dict) ->
@@ -1025,8 +1037,8 @@ base64url(In) ->
 %% more then you want to run it less often. So we time how long it
 %% takes to run, and then suggest how long you should wait before
 %% running it again. Times are in millis.
-interval_operation(Fun, MaxRatio, IdealInterval, LastInterval) ->
-    {Micros, Res} = timer:tc(Fun),
+interval_operation({M, F, A}, MaxRatio, IdealInterval, LastInterval) ->
+    {Micros, Res} = timer:tc(M, F, A),
     {Res, case {Micros > 1000 * (MaxRatio * IdealInterval),
                 Micros > 1000 * (MaxRatio * LastInterval)} of
               {true,  true}  -> round(LastInterval * 1.5);
