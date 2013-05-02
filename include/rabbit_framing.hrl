@@ -13,7 +13,7 @@
 %%  The Original Code is RabbitMQ.
 %%
 %%  The Initial Developer of the Original Code is VMware, Inc.
-%%  Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
+%%  Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
 %%
 -define(PROTOCOL_PORT, 5672).
 -define(FRAME_METHOD, 1).
@@ -103,6 +103,9 @@
 -record('basic.recover', {requeue = false}).
 -record('basic.recover_ok', {}).
 -record('basic.nack', {delivery_tag = 0, multiple = false, requeue = true}).
+-record('basic.credit', {consumer_tag = <<"">>, credit, drain}).
+-record('basic.credit_ok', {available}).
+-record('basic.credit_drained', {consumer_tag = <<"">>, credit_drained}).
 -record('tx.select', {}).
 -record('tx.select_ok', {}).
 -record('tx.commit', {}).

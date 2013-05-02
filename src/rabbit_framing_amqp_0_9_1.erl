@@ -13,7 +13,7 @@
 %%  The Original Code is RabbitMQ.
 %%
 %%  The Initial Developer of the Original Code is VMware, Inc.
-%%  Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
+%%  Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
 %%
 -module(rabbit_framing_amqp_0_9_1).
 -include("rabbit_framing.hrl").
@@ -82,9 +82,10 @@
        | 'basic.cancel' | 'basic.cancel_ok' | 'basic.publish' | 'basic.return'
        | 'basic.deliver' | 'basic.get' | 'basic.get_ok' | 'basic.get_empty'
        | 'basic.ack' | 'basic.reject' | 'basic.recover_async' | 'basic.recover'
-       | 'basic.recover_ok' | 'basic.nack' | 'tx.select' | 'tx.select_ok'
-       | 'tx.commit' | 'tx.commit_ok' | 'tx.rollback' | 'tx.rollback_ok'
-       | 'confirm.select' | 'confirm.select_ok' )).
+       | 'basic.recover_ok' | 'basic.nack' | 'basic.credit' | 'basic.credit_ok'
+       | 'basic.credit_drained' | 'tx.select' | 'tx.select_ok' | 'tx.commit'
+       | 'tx.commit_ok' | 'tx.rollback' | 'tx.rollback_ok' | 'confirm.select'
+       | 'confirm.select_ok' )).
 -type(amqp_method() ::
        ( {10, 10} | {10, 11} | {10, 20} | {10, 21} | {10, 30} | {10, 31}
        | {10, 40} | {10, 41} | {10, 50} | {10, 51} | {20, 10} | {20, 11}
@@ -95,8 +96,8 @@
        | {60, 10} | {60, 11} | {60, 20} | {60, 21} | {60, 30} | {60, 31}
        | {60, 40} | {60, 50} | {60, 60} | {60, 70} | {60, 71} | {60, 72}
        | {60, 80} | {60, 90} | {60, 100} | {60, 110} | {60, 111} | {60, 120}
-       | {90, 10} | {90, 11} | {90, 20} | {90, 21} | {90, 30} | {90, 31}
-       | {85, 10} | {85, 11} )).
+       | {60, 200} | {60, 201} | {60, 202} | {90, 10} | {90, 11} | {90, 20}
+       | {90, 21} | {90, 30} | {90, 31} | {85, 10} | {85, 11} )).
 -type(amqp_method_record() ::
        ( #'connection.start'{} | #'connection.start_ok'{} | #'connection.secure'{} | #'connection.secure_ok'{}
        | #'connection.tune'{} | #'connection.tune_ok'{} | #'connection.open'{} | #'connection.open_ok'{}
@@ -111,47 +112,49 @@
        | #'basic.cancel'{} | #'basic.cancel_ok'{} | #'basic.publish'{} | #'basic.return'{}
        | #'basic.deliver'{} | #'basic.get'{} | #'basic.get_ok'{} | #'basic.get_empty'{}
        | #'basic.ack'{} | #'basic.reject'{} | #'basic.recover_async'{} | #'basic.recover'{}
-       | #'basic.recover_ok'{} | #'basic.nack'{} | #'tx.select'{} | #'tx.select_ok'{}
-       | #'tx.commit'{} | #'tx.commit_ok'{} | #'tx.rollback'{} | #'tx.rollback_ok'{}
-       | #'confirm.select'{} | #'confirm.select_ok'{} )).
+       | #'basic.recover_ok'{} | #'basic.nack'{} | #'basic.credit'{} | #'basic.credit_ok'{}
+       | #'basic.credit_drained'{} | #'tx.select'{} | #'tx.select_ok'{} | #'tx.commit'{}
+       | #'tx.commit_ok'{} | #'tx.rollback'{} | #'tx.rollback_ok'{} | #'confirm.select'{}
+       | #'confirm.select_ok'{} )).
 -type(amqp_method_field_name() ::
-       ( ticket | known_hosts | ticket | routing_key
-       | message_count | no_ack | heartbeat | exchange
-       | ticket | ticket | ticket | method_id
-       | routing_key | queue | locale | active
-       | routing_key | exchange | consumer_tag | ticket
-       | channel_id | queue | destination | consumer_tag
-       | exchange | exchange | ticket | version_minor
-       | multiple | if_unused | no_ack | queue
-       | prefetch_count | out_of_band | delivery_tag | delivery_tag
-       | passive | exchange | exchange | challenge
-       | arguments | routing_key | capabilities | version_major
-       | nowait | type | routing_key | consumer_count
-       | ticket | reply_text | insist | if_unused
-       | queue | exclusive | exclusive | realm
-       | destination | passive | routing_key | queue
-       | ticket | redelivered | nowait | auto_delete
-       | message_count | arguments | routing_key | exclusive
-       | response | arguments | durable | nowait
-       | ticket | message_count | nowait | mechanisms
-       | nowait | consumer_tag | passive | auto_delete
-       | cluster_id | multiple | nowait | ticket
-       | channel_max | arguments | consumer_tag | locales
-       | source | message_count | active | internal
-       | server_properties | queue | nowait | delivery_tag
-       | reply_code | ticket | delivery_tag | active
-       | no_local | exchange | write | durable
-       | response | nowait | arguments | prefetch_size
-       | routing_key | reply_text | delivery_tag | client_properties
-       | redelivered | read | arguments | mandatory
-       | requeue | nowait | heartbeat | class_id
-       | nowait | reply_code | queue | frame_max
-       | source | channel_max | queue | method_id
-       | global | reply_text | exchange | ticket
-       | virtual_host | consumer_tag | requeue | immediate
-       | frame_max | requeue | nowait | arguments
-       | if_empty | mechanism | requeue | reply_code
-       | class_id )).
+       ( if_unused | out_of_band | prefetch_size | channel_id
+       | global | active | routing_key | active
+       | routing_key | reply_code | reply_text | class_id
+       | method_id | nowait | routing_key | nowait
+       | exclusive | nowait | realm | exclusive
+       | passive | version_minor | prefetch_count | active
+       | delivery_tag | write | read | consumer_tag
+       | ticket | server_properties | ticket | exchange
+       | type | passive | durable | delivery_tag
+       | cluster_id | auto_delete | delivery_tag | internal
+       | credit | nowait | arguments | reply_code
+       | redelivered | ticket | exchange | multiple
+       | if_unused | nowait | consumer_tag | consumer_tag
+       | no_ack | ticket | exchange | destination
+       | requeue | source | routing_key | nowait
+       | arguments | delivery_tag | ticket | ticket
+       | queue | ticket | destination | nowait
+       | source | routing_key | mechanism | ticket
+       | nowait | arguments | routing_key | message_count
+       | queue | exchange | ticket | queue
+       | queue | passive | multiple | durable
+       | exclusive | auto_delete | locale | nowait
+       | arguments | ticket | delivery_tag | queue
+       | consumer_tag | message_count | consumer_count | no_local
+       | arguments | requeue | routing_key | ticket
+       | queue | consumer_tag | exchange | version_major
+       | mandatory | nowait | no_ack | arguments
+       | mechanisms | reply_text | locales | requeue
+       | client_properties | ticket | immediate | response
+       | nowait | drain | challenge | message_count
+       | available | response | channel_max | frame_max
+       | heartbeat | exchange | if_empty | arguments
+       | consumer_tag | channel_max | frame_max | heartbeat
+       | message_count | virtual_host | capabilities | ticket
+       | insist | redelivered | queue | known_hosts
+       | routing_key | reply_code | exchange | reply_text
+       | exchange | class_id | queue | consumer_tag
+       | credit_drained | method_id | requeue )).
 -type(amqp_property_record() ::
        ( #'P_connection'{} | #'P_channel'{} | #'P_access'{} | #'P_exchange'{}
        | #'P_queue'{} | #'P_basic'{} | #'P_tx'{} | #'P_confirm'{} )).
@@ -337,6 +340,9 @@ lookup_method_name({60, 100}) -> 'basic.recover_async';
 lookup_method_name({60, 110}) -> 'basic.recover';
 lookup_method_name({60, 111}) -> 'basic.recover_ok';
 lookup_method_name({60, 120}) -> 'basic.nack';
+lookup_method_name({60, 200}) -> 'basic.credit';
+lookup_method_name({60, 201}) -> 'basic.credit_ok';
+lookup_method_name({60, 202}) -> 'basic.credit_drained';
 lookup_method_name({90, 10}) -> 'tx.select';
 lookup_method_name({90, 11}) -> 'tx.select_ok';
 lookup_method_name({90, 20}) -> 'tx.commit';
@@ -409,6 +415,9 @@ method_id('basic.recover_async') -> {60, 100};
 method_id('basic.recover') -> {60, 110};
 method_id('basic.recover_ok') -> {60, 111};
 method_id('basic.nack') -> {60, 120};
+method_id('basic.credit') -> {60, 200};
+method_id('basic.credit_ok') -> {60, 201};
+method_id('basic.credit_drained') -> {60, 202};
 method_id('tx.select') -> {90, 10};
 method_id('tx.select_ok') -> {90, 11};
 method_id('tx.commit') -> {90, 20};
@@ -472,6 +481,9 @@ method_has_content('basic.recover_async') -> false;
 method_has_content('basic.recover') -> false;
 method_has_content('basic.recover_ok') -> false;
 method_has_content('basic.nack') -> false;
+method_has_content('basic.credit') -> false;
+method_has_content('basic.credit_ok') -> false;
+method_has_content('basic.credit_drained') -> false;
 method_has_content('tx.select') -> false;
 method_has_content('tx.select_ok') -> false;
 method_has_content('tx.commit') -> false;
@@ -535,6 +547,9 @@ is_method_synchronous(#'basic.recover_async'{}) -> false;
 is_method_synchronous(#'basic.recover'{}) -> true;
 is_method_synchronous(#'basic.recover_ok'{}) -> false;
 is_method_synchronous(#'basic.nack'{}) -> false;
+is_method_synchronous(#'basic.credit'{}) -> true;
+is_method_synchronous(#'basic.credit_ok'{}) -> false;
+is_method_synchronous(#'basic.credit_drained'{}) -> false;
 is_method_synchronous(#'tx.select'{}) -> true;
 is_method_synchronous(#'tx.select_ok'{}) -> false;
 is_method_synchronous(#'tx.commit'{}) -> true;
@@ -598,6 +613,9 @@ method_record('basic.recover_async') -> #'basic.recover_async'{};
 method_record('basic.recover') -> #'basic.recover'{};
 method_record('basic.recover_ok') -> #'basic.recover_ok'{};
 method_record('basic.nack') -> #'basic.nack'{};
+method_record('basic.credit') -> #'basic.credit'{};
+method_record('basic.credit_ok') -> #'basic.credit_ok'{};
+method_record('basic.credit_drained') -> #'basic.credit_drained'{};
 method_record('tx.select') -> #'tx.select'{};
 method_record('tx.select_ok') -> #'tx.select_ok'{};
 method_record('tx.commit') -> #'tx.commit'{};
@@ -661,6 +679,9 @@ method_fieldnames('basic.recover_async') -> [requeue];
 method_fieldnames('basic.recover') -> [requeue];
 method_fieldnames('basic.recover_ok') -> [];
 method_fieldnames('basic.nack') -> [delivery_tag, multiple, requeue];
+method_fieldnames('basic.credit') -> [consumer_tag, credit, drain];
+method_fieldnames('basic.credit_ok') -> [available];
+method_fieldnames('basic.credit_drained') -> [consumer_tag, credit_drained];
 method_fieldnames('tx.select') -> [];
 method_fieldnames('tx.select_ok') -> [];
 method_fieldnames('tx.commit') -> [];
@@ -831,6 +852,13 @@ decode_method_fields('basic.nack', <<F0:64/unsigned, F1Bits:8>>) ->
   F1 = ((F1Bits band 1) /= 0),
   F2 = ((F1Bits band 2) /= 0),
   #'basic.nack'{delivery_tag = F0, multiple = F1, requeue = F2};
+decode_method_fields('basic.credit', <<F0Len:8/unsigned, F0:F0Len/binary, F1:32/unsigned, F2Bits:8>>) ->
+  F2 = ((F2Bits band 1) /= 0),
+  #'basic.credit'{consumer_tag = F0, credit = F1, drain = F2};
+decode_method_fields('basic.credit_ok', <<F0:32/unsigned>>) ->
+  #'basic.credit_ok'{available = F0};
+decode_method_fields('basic.credit_drained', <<F0Len:8/unsigned, F0:F0Len/binary, F1:32/unsigned>>) ->
+  #'basic.credit_drained'{consumer_tag = F0, credit_drained = F1};
 decode_method_fields('tx.select', <<>>) ->
   #'tx.select'{};
 decode_method_fields('tx.select_ok', <<>>) ->
@@ -1083,6 +1111,15 @@ encode_method_fields(#'basic.recover_ok'{}) ->
 encode_method_fields(#'basic.nack'{delivery_tag = F0, multiple = F1, requeue = F2}) ->
   F1Bits = ((bitvalue(F1) bsl 0) bor (bitvalue(F2) bsl 1)),
   <<F0:64/unsigned, F1Bits:8>>;
+encode_method_fields(#'basic.credit'{consumer_tag = F0, credit = F1, drain = F2}) ->
+  F0Len = shortstr_size(F0),
+  F2Bits = ((bitvalue(F2) bsl 0)),
+  <<F0Len:8/unsigned, F0:F0Len/binary, F1:32/unsigned, F2Bits:8>>;
+encode_method_fields(#'basic.credit_ok'{available = F0}) ->
+  <<F0:32/unsigned>>;
+encode_method_fields(#'basic.credit_drained'{consumer_tag = F0, credit_drained = F1}) ->
+  F0Len = shortstr_size(F0),
+  <<F0Len:8/unsigned, F0:F0Len/binary, F1:32/unsigned>>;
 encode_method_fields(#'tx.select'{}) ->
   <<>>;
 encode_method_fields(#'tx.select_ok'{}) ->
