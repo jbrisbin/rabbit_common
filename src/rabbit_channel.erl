@@ -841,6 +841,8 @@ handle_method(#'basic.qos'{prefetch_count = 0}, _,
 
 handle_method(#'basic.qos'{prefetch_count = PrefetchCount}, _,
               State = #ch{limiter = Limiter, unacked_message_q = UAMQ}) ->
+    %% TODO queue:len(UAMQ) is not strictly right since that counts
+    %% unacked messages from basic.get too. Pretty obscure though.
     Limiter1 = rabbit_limiter:limit_prefetch(Limiter,
                                              PrefetchCount, queue:len(UAMQ)),
     {reply, #'basic.qos_ok'{},
@@ -1083,8 +1085,9 @@ handle_method(#'tx.commit'{}, _, #ch{tx = none}) ->
 handle_method(#'tx.commit'{}, _, State = #ch{tx      = {Msgs, Acks},
                                              limiter = Limiter}) ->
     State1 = rabbit_misc:queue_fold(fun deliver_to_queues/2, State, Msgs),
-    lists:foreach(fun ({ack,     A}) -> ack(A, State1);
-                      ({Requeue, A}) -> reject(Requeue, A, Limiter)
+    Rev = fun (X) -> lists:reverse(lists:sort(X)) end,
+    lists:foreach(fun ({ack,     A}) -> ack(Rev(A), State1);
+                      ({Requeue, A}) -> reject(Requeue, Rev(A), Limiter)
                   end, lists:reverse(Acks)),
     {noreply, maybe_complete_tx(State1#ch{tx = committing})};
 
