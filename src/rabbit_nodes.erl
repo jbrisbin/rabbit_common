@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 -module(rabbit_nodes).
@@ -96,7 +96,7 @@ cookie_hash() ->
     base64:encode_to_string(erlang:md5(atom_to_list(erlang:get_cookie()))).
 
 is_running(Node, Application) ->
-    case rpc:call(Node, application, which_applications, [infinity]) of
+    case rpc:call(Node, rabbit_misc, which_applications, []) of
         {badrpc, _} -> false;
         Apps        -> proplists:is_defined(Application, Apps)
     end.

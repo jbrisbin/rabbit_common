@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 -module(rabbit_amqqueue).
@@ -219,8 +219,10 @@ find_durable_queues() ->
     %% TODO: use dirty ops instead
     rabbit_misc:execute_mnesia_transaction(
       fun () ->
-              qlc:e(qlc:q([Q || Q = #amqqueue{pid = Pid}
+              qlc:e(qlc:q([Q || Q = #amqqueue{name = Name,
+                                              pid  = Pid}
                                     <- mnesia:table(rabbit_durable_queue),
+                                mnesia:read(rabbit_queue, Name, read) =:= [],
                                 node(Pid) == Node]))
       end).
 
@@ -282,7 +284,10 @@ update(Name, Fun) ->
     end.
 
 store_queue(Q = #amqqueue{durable = true}) ->
-    ok = mnesia:write(rabbit_durable_queue, Q#amqqueue{slave_pids = []}, write),
+    ok = mnesia:write(rabbit_durable_queue,
+                      Q#amqqueue{slave_pids      = [],
+                                 sync_slave_pids = [],
+                                 gm_pids         = []}, write),
     ok = mnesia:write(rabbit_queue, Q, write),
     ok;
 store_queue(Q = #amqqueue{durable = false}) ->
@@ -407,12 +412,8 @@ check_declare_arguments(QueueName, Args) ->
 args() ->
     [{<<"x-expires">>,                 fun check_expires_arg/2},
      {<<"x-message-ttl">>,             fun check_message_ttl_arg/2},
-     {<<"x-dead-letter-exchange">>,    fun check_string_arg/2},
      {<<"x-dead-letter-routing-key">>, fun check_dlxrk_arg/2},
      {<<"x-max-length">>,              fun check_max_length_arg/2}].
-
-check_string_arg({longstr, _}, _Args) -> ok;
-check_string_arg({Type,    _}, _Args) -> {error, {unacceptable_type, Type}}.
 
 check_int_arg({Type, _}, _) ->
     case lists:member(Type, ?INTEGER_ARG_TYPES) of
@@ -592,15 +593,18 @@ internal_delete1(QueueName) ->
 internal_delete(QueueName) ->
     rabbit_misc:execute_mnesia_tx_with_tail(
       fun () ->
-              case mnesia:wread({rabbit_queue, QueueName}) of
-                  []  -> rabbit_misc:const({error, not_found});
-                  [_] -> Deletions = internal_delete1(QueueName),
-                         T = rabbit_binding:process_deletions(Deletions),
-                         fun() ->
-                                 ok = T(),
-                                 ok = rabbit_event:notify(queue_deleted,
-                                                          [{name, QueueName}])
-                         end
+              case {mnesia:wread({rabbit_queue, QueueName}),
+                    mnesia:wread({rabbit_durable_queue, QueueName})} of
+                  {[], []} ->
+                      rabbit_misc:const({error, not_found});
+                  _ ->
+                      Deletions = internal_delete1(QueueName),
+                      T = rabbit_binding:process_deletions(Deletions),
+                      fun() ->
+                              ok = T(),
+                              ok = rabbit_event:notify(queue_deleted,
+                                                       [{name, QueueName}])
+                      end
               end
       end).
 

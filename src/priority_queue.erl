@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 %% Priority queues have essentially the same interface as ordinary
@@ -51,7 +51,7 @@
 
 -type(q() :: pqueue()).
 -type(priority() :: integer() | 'infinity').
--type(squeue() :: {queue, [any()], [any()]}).
+-type(squeue() :: {queue, [any()], [any()], non_neg_integer()}).
 -type(pqueue() ::  squeue() | {pqueue, [{priority(), squeue()}]}).
 
 -spec(new/0 :: () -> pqueue()).

@@ -12,8 +12,8 @@
 %%
 %%  The Original Code is RabbitMQ.
 %%
-%%  The Initial Developer of the Original Code is VMware, Inc.
-%%  Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%%  The Initial Developer of the Original Code is GoPivotal, Inc.
+%%  Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 -module(rabbit_framing_amqp_0_9_1).
 -include("rabbit_framing.hrl").
@@ -71,90 +71,91 @@
 -type(amqp_method_name() ::
        ( 'connection.start' | 'connection.start_ok' | 'connection.secure' | 'connection.secure_ok'
        | 'connection.tune' | 'connection.tune_ok' | 'connection.open' | 'connection.open_ok'
-       | 'connection.close' | 'connection.close_ok' | 'channel.open' | 'channel.open_ok'
-       | 'channel.flow' | 'channel.flow_ok' | 'channel.close' | 'channel.close_ok'
-       | 'access.request' | 'access.request_ok' | 'exchange.declare' | 'exchange.declare_ok'
-       | 'exchange.delete' | 'exchange.delete_ok' | 'exchange.bind' | 'exchange.bind_ok'
-       | 'exchange.unbind' | 'exchange.unbind_ok' | 'queue.declare' | 'queue.declare_ok'
-       | 'queue.bind' | 'queue.bind_ok' | 'queue.purge' | 'queue.purge_ok'
-       | 'queue.delete' | 'queue.delete_ok' | 'queue.unbind' | 'queue.unbind_ok'
-       | 'basic.qos' | 'basic.qos_ok' | 'basic.consume' | 'basic.consume_ok'
-       | 'basic.cancel' | 'basic.cancel_ok' | 'basic.publish' | 'basic.return'
-       | 'basic.deliver' | 'basic.get' | 'basic.get_ok' | 'basic.get_empty'
-       | 'basic.ack' | 'basic.reject' | 'basic.recover_async' | 'basic.recover'
-       | 'basic.recover_ok' | 'basic.nack' | 'basic.credit' | 'basic.credit_ok'
-       | 'basic.credit_drained' | 'tx.select' | 'tx.select_ok' | 'tx.commit'
-       | 'tx.commit_ok' | 'tx.rollback' | 'tx.rollback_ok' | 'confirm.select'
-       | 'confirm.select_ok' )).
+       | 'connection.close' | 'connection.close_ok' | 'connection.blocked' | 'connection.unblocked'
+       | 'channel.open' | 'channel.open_ok' | 'channel.flow' | 'channel.flow_ok'
+       | 'channel.close' | 'channel.close_ok' | 'access.request' | 'access.request_ok'
+       | 'exchange.declare' | 'exchange.declare_ok' | 'exchange.delete' | 'exchange.delete_ok'
+       | 'exchange.bind' | 'exchange.bind_ok' | 'exchange.unbind' | 'exchange.unbind_ok'
+       | 'queue.declare' | 'queue.declare_ok' | 'queue.bind' | 'queue.bind_ok'
+       | 'queue.purge' | 'queue.purge_ok' | 'queue.delete' | 'queue.delete_ok'
+       | 'queue.unbind' | 'queue.unbind_ok' | 'basic.qos' | 'basic.qos_ok'
+       | 'basic.consume' | 'basic.consume_ok' | 'basic.cancel' | 'basic.cancel_ok'
+       | 'basic.publish' | 'basic.return' | 'basic.deliver' | 'basic.get'
+       | 'basic.get_ok' | 'basic.get_empty' | 'basic.ack' | 'basic.reject'
+       | 'basic.recover_async' | 'basic.recover' | 'basic.recover_ok' | 'basic.nack'
+       | 'basic.credit' | 'basic.credit_ok' | 'basic.credit_drained' | 'tx.select'
+       | 'tx.select_ok' | 'tx.commit' | 'tx.commit_ok' | 'tx.rollback'
+       | 'tx.rollback_ok' | 'confirm.select' | 'confirm.select_ok' )).
 -type(amqp_method() ::
        ( {10, 10} | {10, 11} | {10, 20} | {10, 21} | {10, 30} | {10, 31}
-       | {10, 40} | {10, 41} | {10, 50} | {10, 51} | {20, 10} | {20, 11}
-       | {20, 20} | {20, 21} | {20, 40} | {20, 41} | {30, 10} | {30, 11}
-       | {40, 10} | {40, 11} | {40, 20} | {40, 21} | {40, 30} | {40, 31}
-       | {40, 40} | {40, 51} | {50, 10} | {50, 11} | {50, 20} | {50, 21}
-       | {50, 30} | {50, 31} | {50, 40} | {50, 41} | {50, 50} | {50, 51}
-       | {60, 10} | {60, 11} | {60, 20} | {60, 21} | {60, 30} | {60, 31}
-       | {60, 40} | {60, 50} | {60, 60} | {60, 70} | {60, 71} | {60, 72}
-       | {60, 80} | {60, 90} | {60, 100} | {60, 110} | {60, 111} | {60, 120}
-       | {60, 200} | {60, 201} | {60, 202} | {90, 10} | {90, 11} | {90, 20}
-       | {90, 21} | {90, 30} | {90, 31} | {85, 10} | {85, 11} )).
+       | {10, 40} | {10, 41} | {10, 50} | {10, 51} | {10, 60} | {10, 61}
+       | {20, 10} | {20, 11} | {20, 20} | {20, 21} | {20, 40} | {20, 41}
+       | {30, 10} | {30, 11} | {40, 10} | {40, 11} | {40, 20} | {40, 21}
+       | {40, 30} | {40, 31} | {40, 40} | {40, 51} | {50, 10} | {50, 11}
+       | {50, 20} | {50, 21} | {50, 30} | {50, 31} | {50, 40} | {50, 41}
+       | {50, 50} | {50, 51} | {60, 10} | {60, 11} | {60, 20} | {60, 21}
+       | {60, 30} | {60, 31} | {60, 40} | {60, 50} | {60, 60} | {60, 70}
+       | {60, 71} | {60, 72} | {60, 80} | {60, 90} | {60, 100} | {60, 110}
+       | {60, 111} | {60, 120} | {60, 200} | {60, 201} | {60, 202} | {90, 10}
+       | {90, 11} | {90, 20} | {90, 21} | {90, 30} | {90, 31} | {85, 10}
+       | {85, 11} )).
 -type(amqp_method_record() ::
        ( #'connection.start'{} | #'connection.start_ok'{} | #'connection.secure'{} | #'connection.secure_ok'{}
        | #'connection.tune'{} | #'connection.tune_ok'{} | #'connection.open'{} | #'connection.open_ok'{}
-       | #'connection.close'{} | #'connection.close_ok'{} | #'channel.open'{} | #'channel.open_ok'{}
-       | #'channel.flow'{} | #'channel.flow_ok'{} | #'channel.close'{} | #'channel.close_ok'{}
-       | #'access.request'{} | #'access.request_ok'{} | #'exchange.declare'{} | #'exchange.declare_ok'{}
-       | #'exchange.delete'{} | #'exchange.delete_ok'{} | #'exchange.bind'{} | #'exchange.bind_ok'{}
-       | #'exchange.unbind'{} | #'exchange.unbind_ok'{} | #'queue.declare'{} | #'queue.declare_ok'{}
-       | #'queue.bind'{} | #'queue.bind_ok'{} | #'queue.purge'{} | #'queue.purge_ok'{}
-       | #'queue.delete'{} | #'queue.delete_ok'{} | #'queue.unbind'{} | #'queue.unbind_ok'{}
-       | #'basic.qos'{} | #'basic.qos_ok'{} | #'basic.consume'{} | #'basic.consume_ok'{}
-       | #'basic.cancel'{} | #'basic.cancel_ok'{} | #'basic.publish'{} | #'basic.return'{}
-       | #'basic.deliver'{} | #'basic.get'{} | #'basic.get_ok'{} | #'basic.get_empty'{}
-       | #'basic.ack'{} | #'basic.reject'{} | #'basic.recover_async'{} | #'basic.recover'{}
-       | #'basic.recover_ok'{} | #'basic.nack'{} | #'basic.credit'{} | #'basic.credit_ok'{}
-       | #'basic.credit_drained'{} | #'tx.select'{} | #'tx.select_ok'{} | #'tx.commit'{}
-       | #'tx.commit_ok'{} | #'tx.rollback'{} | #'tx.rollback_ok'{} | #'confirm.select'{}
-       | #'confirm.select_ok'{} )).
+       | #'connection.close'{} | #'connection.close_ok'{} | #'connection.blocked'{} | #'connection.unblocked'{}
+       | #'channel.open'{} | #'channel.open_ok'{} | #'channel.flow'{} | #'channel.flow_ok'{}
+       | #'channel.close'{} | #'channel.close_ok'{} | #'access.request'{} | #'access.request_ok'{}
+       | #'exchange.declare'{} | #'exchange.declare_ok'{} | #'exchange.delete'{} | #'exchange.delete_ok'{}
+       | #'exchange.bind'{} | #'exchange.bind_ok'{} | #'exchange.unbind'{} | #'exchange.unbind_ok'{}
+       | #'queue.declare'{} | #'queue.declare_ok'{} | #'queue.bind'{} | #'queue.bind_ok'{}
+       | #'queue.purge'{} | #'queue.purge_ok'{} | #'queue.delete'{} | #'queue.delete_ok'{}
+       | #'queue.unbind'{} | #'queue.unbind_ok'{} | #'basic.qos'{} | #'basic.qos_ok'{}
+       | #'basic.consume'{} | #'basic.consume_ok'{} | #'basic.cancel'{} | #'basic.cancel_ok'{}
+       | #'basic.publish'{} | #'basic.return'{} | #'basic.deliver'{} | #'basic.get'{}
+       | #'basic.get_ok'{} | #'basic.get_empty'{} | #'basic.ack'{} | #'basic.reject'{}
+       | #'basic.recover_async'{} | #'basic.recover'{} | #'basic.recover_ok'{} | #'basic.nack'{}
+       | #'basic.credit'{} | #'basic.credit_ok'{} | #'basic.credit_drained'{} | #'tx.select'{}
+       | #'tx.select_ok'{} | #'tx.commit'{} | #'tx.commit_ok'{} | #'tx.rollback'{}
+       | #'tx.rollback_ok'{} | #'confirm.select'{} | #'confirm.select_ok'{} )).
 -type(amqp_method_field_name() ::
-       ( exchange | routing_key | version_minor | server_properties
-       | locale | mechanisms | locales | routing_key
-       | requeue | client_properties | mechanism | exchange
-       | queue | nowait | credit | drain
-       | version_major | prefetch_count | challenge | message_count
-       | response | ticket | channel_max | available
-       | frame_max | nowait | heartbeat | if_empty
-       | if_unused | channel_max | frame_max | exchange
-       | heartbeat | nowait | message_count | arguments
-       | cluster_id | virtual_host | capabilities | insist
-       | queue | credit_drained | known_hosts | routing_key
-       | delivery_tag | delivery_tag | reply_code | reply_text
-       | class_id | multiple | method_id | routing_key
-       | multiple | redelivered | out_of_band | prefetch_size
-       | channel_id | global | active | exchange
-       | consumer_tag | delivery_tag | active | reply_code
-       | reply_text | class_id | ticket | method_id
-       | no_ack | exclusive | nowait | realm
-       | exclusive | ticket | passive | queue
-       | active | write | read | consumer_tag
-       | response | consumer_tag | ticket | exchange
-       | ticket | exchange | type | passive
-       | no_local | durable | auto_delete | internal
-       | nowait | arguments | routing_key | requeue
-       | arguments | ticket | reply_code | ticket
-       | ticket | exchange | if_unused | nowait
-       | no_ack | mandatory | consumer_tag | nowait
-       | ticket | destination | source | routing_key
-       | immediate | nowait | arguments | ticket
-       | queue | ticket | destination | source
-       | arguments | consumer_tag | routing_key | nowait
-       | arguments | routing_key | message_count | nowait
-       | requeue | delivery_tag | ticket | queue
-       | passive | durable | exclusive | redelivered
-       | reply_text | auto_delete | nowait | consumer_tag
-       | arguments | delivery_tag | queue | message_count
-       | queue | consumer_tag | consumer_count | exchange
-       | requeue | ticket | queue )).
+       ( passive | reply_text | class_id | reply_code
+       | method_id | ticket | queue | reason
+       | ticket | ticket | message_count | delivery_tag
+       | out_of_band | exchange | channel_id | multiple
+       | auto_delete | queue | active | active
+       | ticket | reply_code | consumer_tag | reply_text
+       | exchange | class_id | method_id | delivery_tag
+       | requeue | routing_key | nowait | realm
+       | exclusive | passive | active | server_properties
+       | reply_text | mechanisms | no_ack | arguments
+       | locales | frame_max | ticket | client_properties
+       | mechanism | response | locale | no_ack
+       | immediate | type | challenge | durable
+       | response | internal | channel_max | nowait
+       | arguments | heartbeat | available | channel_max
+       | frame_max | if_unused | ticket | nowait
+       | virtual_host | capabilities | credit | insist
+       | destination | source | version_minor | routing_key
+       | exchange | nowait | consumer_tag | arguments
+       | queue | requeue | exchange | redelivered
+       | heartbeat | ticket | write | destination
+       | source | routing_key | credit_drained | nowait
+       | exclusive | global | arguments | read
+       | exchange | prefetch_size | ticket | queue
+       | routing_key | routing_key | passive | delivery_tag
+       | durable | exclusive | auto_delete | nowait
+       | arguments | drain | consumer_tag | version_major
+       | no_local | queue | message_count | consumer_count
+       | arguments | prefetch_count | ticket | nowait
+       | consumer_tag | ticket | requeue | queue
+       | exchange | routing_key | nowait | nowait
+       | arguments | consumer_tag | delivery_tag | ticket
+       | cluster_id | known_hosts | queue | ticket
+       | consumer_tag | nowait | routing_key | delivery_tag
+       | mandatory | multiple | message_count | routing_key
+       | exchange | ticket | queue | if_unused
+       | if_empty | nowait | reply_code | requeue
+       | consumer_tag | message_count | redelivered | exchange )).
 -type(amqp_property_record() ::
        ( #'P_connection'{} | #'P_channel'{} | #'P_access'{} | #'P_exchange'{}
        | #'P_queue'{} | #'P_basic'{} | #'P_tx'{} | #'P_confirm'{} )).
@@ -296,6 +297,8 @@ lookup_method_name({10, 40}) -> 'connection.open';
 lookup_method_name({10, 41}) -> 'connection.open_ok';
 lookup_method_name({10, 50}) -> 'connection.close';
 lookup_method_name({10, 51}) -> 'connection.close_ok';
+lookup_method_name({10, 60}) -> 'connection.blocked';
+lookup_method_name({10, 61}) -> 'connection.unblocked';
 lookup_method_name({20, 10}) -> 'channel.open';
 lookup_method_name({20, 11}) -> 'channel.open_ok';
 lookup_method_name({20, 20}) -> 'channel.flow';
@@ -371,6 +374,8 @@ method_id('connection.open') -> {10, 40};
 method_id('connection.open_ok') -> {10, 41};
 method_id('connection.close') -> {10, 50};
 method_id('connection.close_ok') -> {10, 51};
+method_id('connection.blocked') -> {10, 60};
+method_id('connection.unblocked') -> {10, 61};
 method_id('channel.open') -> {20, 10};
 method_id('channel.open_ok') -> {20, 11};
 method_id('channel.flow') -> {20, 20};
@@ -437,6 +442,8 @@ method_has_content('connection.open') -> false;
 method_has_content('connection.open_ok') -> false;
 method_has_content('connection.close') -> false;
 method_has_content('connection.close_ok') -> false;
+method_has_content('connection.blocked') -> false;
+method_has_content('connection.unblocked') -> false;
 method_has_content('channel.open') -> false;
 method_has_content('channel.open_ok') -> false;
 method_has_content('channel.flow') -> false;
@@ -503,6 +510,8 @@ is_method_synchronous(#'connection.open'{}) -> true;
 is_method_synchronous(#'connection.open_ok'{}) -> false;
 is_method_synchronous(#'connection.close'{}) -> true;
 is_method_synchronous(#'connection.close_ok'{}) -> false;
+is_method_synchronous(#'connection.blocked'{}) -> false;
+is_method_synchronous(#'connection.unblocked'{}) -> false;
 is_method_synchronous(#'channel.open'{}) -> true;
 is_method_synchronous(#'channel.open_ok'{}) -> false;
 is_method_synchronous(#'channel.flow'{}) -> true;
@@ -569,6 +578,8 @@ method_record('connection.open') -> #'connection.open'{};
 method_record('connection.open_ok') -> #'connection.open_ok'{};
 method_record('connection.close') -> #'connection.close'{};
 method_record('connection.close_ok') -> #'connection.close_ok'{};
+method_record('connection.blocked') -> #'connection.blocked'{};
+method_record('connection.unblocked') -> #'connection.unblocked'{};
 method_record('channel.open') -> #'channel.open'{};
 method_record('channel.open_ok') -> #'channel.open_ok'{};
 method_record('channel.flow') -> #'channel.flow'{};
@@ -635,6 +646,8 @@ method_fieldnames('connection.open') -> [virtual_host, capabilities, insist];
 method_fieldnames('connection.open_ok') -> [known_hosts];
 method_fieldnames('connection.close') -> [reply_code, reply_text, class_id, method_id];
 method_fieldnames('connection.close_ok') -> [];
+method_fieldnames('connection.blocked') -> [reason];
+method_fieldnames('connection.unblocked') -> [];
 method_fieldnames('channel.open') -> [out_of_band];
 method_fieldnames('channel.open_ok') -> [channel_id];
 method_fieldnames('channel.flow') -> [active];
@@ -714,6 +727,10 @@ decode_method_fields('connection.close', <<F0:16/unsigned, F1Len:8/unsigned, F1:
   #'connection.close'{reply_code = F0, reply_text = F1, class_id = F2, method_id = F3};
 decode_method_fields('connection.close_ok', <<>>) ->
   #'connection.close_ok'{};
+decode_method_fields('connection.blocked', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  #'connection.blocked'{reason = F0};
+decode_method_fields('connection.unblocked', <<>>) ->
+  #'connection.unblocked'{};
 decode_method_fields('channel.open', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
   #'channel.open'{out_of_band = F0};
 decode_method_fields('channel.open_ok', <<F0Len:32/unsigned, F0:F0Len/binary>>) ->
@@ -945,6 +962,11 @@ encode_method_fields(#'connection.close'{reply_code = F0, reply_text = F1, class
   F1Len = shortstr_size(F1),
   <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2:16/unsigned, F3:16/unsigned>>;
 encode_method_fields(#'connection.close_ok'{}) ->
+  <<>>;
+encode_method_fields(#'connection.blocked'{reason = F0}) ->
+  F0Len = shortstr_size(F0),
+  <<F0Len:8/unsigned, F0:F0Len/binary>>;
+encode_method_fields(#'connection.unblocked'{}) ->
   <<>>;
 encode_method_fields(#'channel.open'{out_of_band = F0}) ->
   F0Len = shortstr_size(F0),

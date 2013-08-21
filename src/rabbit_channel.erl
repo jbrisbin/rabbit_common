@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 -module(rabbit_channel).
@@ -894,9 +894,13 @@ handle_method(#'exchange.declare'{exchange = ExchangeNameBin,
             {ok, FoundX} -> FoundX;
             {error, not_found} ->
                 check_name('exchange', ExchangeNameBin),
-                case rabbit_misc:r_arg(VHostPath, exchange, Args,
-                                       <<"alternate-exchange">>) of
+                AeKey = <<"alternate-exchange">>,
+                case rabbit_misc:r_arg(VHostPath, exchange, Args, AeKey) of
                     undefined -> ok;
+                    {error, {invalid_type, Type}} ->
+                        precondition_failed(
+                          "invalid type '~s' for arg '~s' in ~s",
+                          [Type, AeKey, rabbit_misc:rs(ExchangeName)]);
                     AName     -> check_read_permitted(ExchangeName, State),
                                  check_write_permitted(AName, State),
                                  ok
@@ -986,6 +990,19 @@ handle_method(#'queue.declare'{queue       = QueueNameBin,
             return_queue_declare_ok(QueueName, NoWait, MessageCount,
                                     ConsumerCount, State);
         {error, not_found} ->
+            DlxKey = <<"x-dead-letter-exchange">>,
+            case rabbit_misc:r_arg(VHostPath, exchange, Args, DlxKey) of
+               undefined ->
+                   ok;
+               {error, {invalid_type, Type}} ->
+                    precondition_failed(
+                      "invalid type '~s' for arg '~s' in ~s",
+                      [Type, DlxKey, rabbit_misc:rs(QueueName)]);
+               DLX ->
+                   check_read_permitted(QueueName, State),
+                   check_write_permitted(DLX, State),
+                   ok
+            end,
             case rabbit_amqqueue:declare(QueueName, Durable, AutoDelete,
                                          Args, Owner) of
                 {new, #amqqueue{pid = QPid}} ->
@@ -1198,7 +1215,8 @@ handle_publishing_queue_down(QPid, Reason, State = #ch{unconfirmed = UC}) ->
 
 handle_consuming_queue_down(QPid,
                             State = #ch{consumer_mapping = ConsumerMapping,
-                                        queue_consumers  = QCons}) ->
+                                        queue_consumers  = QCons,
+                                        queue_names      = QNames}) ->
     ConsumerTags = case dict:find(QPid, QCons) of
                        error       -> gb_sets:new();
                        {ok, CTags} -> CTags
@@ -1208,6 +1226,11 @@ handle_consuming_queue_down(QPid,
                              ok = send(#'basic.cancel'{consumer_tag = CTag,
                                                        nowait       = true},
                                        State),
+                             rabbit_event:notify(
+                               consumer_deleted,
+                               [{consumer_tag, CTag},
+                                {channel,      self()},
+                                {queue,        dict:fetch(QPid, QNames)}]),
                              dict:erase(CTag, CMap)
                      end, ConsumerMapping, ConsumerTags),
     State#ch{consumer_mapping = ConsumerMapping1,
