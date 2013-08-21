@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 -module(rabbit_misc).
@@ -61,12 +61,14 @@
 -export([multi_call/2]).
 -export([os_cmd/1]).
 -export([gb_sets_difference/2]).
--export([version/0]).
+-export([version/0, which_applications/0]).
 -export([sequence_error/1]).
 -export([json_encode/1, json_decode/1, json_to_term/1, term_to_json/1]).
 -export([check_expiry/1]).
 -export([base64url/1]).
 -export([interval_operation/4]).
+-export([ensure_timer/4, stop_timer/2]).
+-export([get_parent/0]).
 
 %% Horrible macro to use in guards
 -define(IS_BENIGN_EXIT(R),
@@ -140,9 +142,11 @@
                when is_subtype(K, atom())).
 -spec(r_arg/4 ::
         (rabbit_types:vhost() | rabbit_types:r(atom()), K,
-         rabbit_framing:amqp_table(), binary())
-        -> undefined | rabbit_types:r(K)
-               when is_subtype(K, atom())).
+         rabbit_framing:amqp_table(), binary()) ->
+                      undefined |
+                      rabbit_types:error(
+                        {invalid_type, rabbit_framing:amqp_field_type()}) |
+                      rabbit_types:r(K) when is_subtype(K, atom())).
 -spec(rs/1 :: (rabbit_types:r(atom())) -> string()).
 -spec(enable_cover/0 :: () -> ok_or_error()).
 -spec(start_cover/1 :: ([{string(), string()} | string()]) -> 'ok').
@@ -230,6 +234,7 @@
 -spec(os_cmd/1 :: (string()) -> string()).
 -spec(gb_sets_difference/2 :: (gb_set(), gb_set()) -> gb_set()).
 -spec(version/0 :: () -> string()).
+-spec(which_applications/0 :: () -> [{atom(), string(), string()}]).
 -spec(sequence_error/1 :: ([({'error', any()} | any())])
                        -> {'error', any()} | any()).
 -spec(json_encode/1 :: (any()) -> {'ok', string()} | {'error', any()}).
@@ -241,7 +246,9 @@
 -spec(interval_operation/4 ::
         ({atom(), atom(), any()}, float(), non_neg_integer(), non_neg_integer())
         -> {any(), non_neg_integer()}).
-
+-spec(ensure_timer/4 :: (A, non_neg_integer(), non_neg_integer(), any()) -> A).
+-spec(stop_timer/2 :: (A, non_neg_integer()) -> A).
+-spec(get_parent/0 :: () -> pid()).
 -endif.
 
 %%----------------------------------------------------------------------------
@@ -352,13 +359,12 @@ set_table_value(Table, Key, Type, Value) ->
     sort_field_table(
       lists:keystore(Key, 1, Table, {Key, Type, Value})).
 
-r(#resource{virtual_host = VHostPath}, Kind, Name)
-  when is_binary(Name) ->
+r(#resource{virtual_host = VHostPath}, Kind, Name) ->
     #resource{virtual_host = VHostPath, kind = Kind, name = Name};
-r(VHostPath, Kind, Name) when is_binary(Name) andalso is_binary(VHostPath) ->
+r(VHostPath, Kind, Name) ->
     #resource{virtual_host = VHostPath, kind = Kind, name = Name}.
 
-r(VHostPath, Kind) when is_binary(VHostPath) ->
+r(VHostPath, Kind) ->
     #resource{virtual_host = VHostPath, kind = Kind, name = '_'}.
 
 r_arg(#resource{virtual_host = VHostPath}, Kind, Table, Key) ->
@@ -366,7 +372,8 @@ r_arg(#resource{virtual_host = VHostPath}, Kind, Table, Key) ->
 r_arg(VHostPath, Kind, Table, Key) ->
     case table_lookup(Table, Key) of
         {longstr, NameBin} -> r(VHostPath, Kind, NameBin);
-        undefined          -> undefined
+        undefined          -> undefined;
+        {Type, _}          -> {error, {invalid_type, Type}}
     end.
 
 rs(#resource{virtual_host = VHostPath, kind = Kind, name = Name}) ->
@@ -896,13 +903,8 @@ ntoab(IP) ->
         _ -> "[" ++ Str ++ "]"
     end.
 
-is_process_alive(Pid) when node(Pid) =:= node() ->
-    erlang:is_process_alive(Pid);
 is_process_alive(Pid) ->
-    case rpc:call(node(Pid), erlang, is_process_alive, [Pid]) of
-        true -> true;
-        _    -> false
-    end.
+    rpc:call(node(Pid), erlang, is_process_alive, [Pid]) =:= true.
 
 pget(K, P) -> proplists:get_value(K, P).
 pget(K, P, D) -> proplists:get_value(K, P, D).
@@ -969,10 +971,18 @@ receive_multi_call([{Mref, Pid} | MonitorPids], Good, Bad) ->
     end.
 
 os_cmd(Command) ->
-    Exec = hd(string:tokens(Command, " ")),
-    case os:find_executable(Exec) of
-        false -> throw({command_not_found, Exec});
-        _     -> os:cmd(Command)
+    case os:type() of
+        {win32, _} ->
+            %% Clink workaround; see
+            %% http://code.google.com/p/clink/issues/detail?id=141
+            os:cmd(" " ++ Command);
+        _ ->
+            %% Don't just return "/bin/sh: <cmd>: not found" if not found
+            Exec = hd(string:tokens(Command, " ")),
+            case os:find_executable(Exec) of
+                false -> throw({command_not_found, Exec});
+                _     -> os:cmd(Command)
+            end
     end.
 
 gb_sets_difference(S1, S2) ->
@@ -981,6 +991,16 @@ gb_sets_difference(S1, S2) ->
 version() ->
     {ok, VSN} = application:get_key(rabbit, vsn),
     VSN.
+
+%% application:which_applications(infinity) is dangerous, since it can
+%% cause deadlocks on shutdown. So we have to use a timeout variant,
+%% but w/o creating spurious timeout errors.
+which_applications() ->
+    try
+        application:which_applications()
+    catch
+        exit:{timeout, _} -> []
+    end.
 
 sequence_error([T])                      -> T;
 sequence_error([{error, _} = Error | _]) -> Error;
@@ -1046,3 +1066,53 @@ interval_operation({M, F, A}, MaxRatio, IdealInterval, LastInterval) ->
               {false, false} -> lists:max([IdealInterval,
                                            round(LastInterval / 1.5)])
           end}.
+
+ensure_timer(State, Idx, After, Msg) ->
+    case element(Idx, State) of
+        undefined -> TRef = erlang:send_after(After, self(), Msg),
+                     setelement(Idx, State, TRef);
+        _         -> State
+    end.
+
+stop_timer(State, Idx) ->
+    case element(Idx, State) of
+        undefined -> State;
+        TRef      -> case erlang:cancel_timer(TRef) of
+                         false -> State;
+                         _     -> setelement(Idx, State, undefined)
+                     end
+    end.
+
+%% -------------------------------------------------------------------------
+%% Begin copypasta from gen_server2.erl
+
+get_parent() ->
+    case get('$ancestors') of
+        [Parent | _] when is_pid (Parent) -> Parent;
+        [Parent | _] when is_atom(Parent) -> name_to_pid(Parent);
+        _ -> exit(process_was_not_started_by_proc_lib)
+    end.
+
+name_to_pid(Name) ->
+    case whereis(Name) of
+        undefined -> case whereis_name(Name) of
+                         undefined -> exit(could_not_find_registerd_name);
+                         Pid       -> Pid
+                     end;
+        Pid       -> Pid
+    end.
+
+whereis_name(Name) ->
+    case ets:lookup(global_names, Name) of
+        [{_Name, Pid, _Method, _RPid, _Ref}] ->
+            if node(Pid) == node() -> case erlang:is_process_alive(Pid) of
+                                          true  -> Pid;
+                                          false -> undefined
+                                      end;
+               true                -> Pid
+            end;
+        [] -> undefined
+    end.
+
+%% End copypasta from gen_server2.erl
+%% -------------------------------------------------------------------------

@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 -module(app_utils).
 
@@ -93,7 +93,7 @@ app_dependency_order(RootApps, StripUnreachable) ->
 %% Private API
 
 wait_for_application(Application) ->
-    case lists:keymember(Application, 1, application:which_applications()) of
+    case lists:keymember(Application, 1, rabbit_misc:which_applications()) of
          true  -> ok;
          false -> timer:sleep(1000),
                   wait_for_application(Application)

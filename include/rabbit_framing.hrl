@@ -12,8 +12,8 @@
 %%
 %%  The Original Code is RabbitMQ.
 %%
-%%  The Initial Developer of the Original Code is VMware, Inc.
-%%  Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
+%%  The Initial Developer of the Original Code is GoPivotal, Inc.
+%%  Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 -define(PROTOCOL_PORT, 5672).
 -define(FRAME_METHOD, 1).
@@ -57,6 +57,8 @@
 -record('connection.open_ok', {known_hosts = <<"">>}).
 -record('connection.close', {reply_code, reply_text = <<"">>, class_id, method_id}).
 -record('connection.close_ok', {}).
+-record('connection.blocked', {reason = <<"">>}).
+-record('connection.unblocked', {}).
 -record('connection.redirect', {host, known_hosts = <<"">>}).
 -record('channel.open', {out_of_band = <<"">>}).
 -record('channel.open_ok', {channel_id = <<"">>}).
@@ -103,6 +105,9 @@
 -record('basic.recover', {requeue = false}).
 -record('basic.recover_ok', {}).
 -record('basic.nack', {delivery_tag = 0, multiple = false, requeue = true}).
+-record('basic.credit', {consumer_tag = <<"">>, credit, drain}).
+-record('basic.credit_ok', {available}).
+-record('basic.credit_drained', {consumer_tag = <<"">>, credit_drained}).
 -record('tx.select', {}).
 -record('tx.select_ok', {}).
 -record('tx.commit', {}).

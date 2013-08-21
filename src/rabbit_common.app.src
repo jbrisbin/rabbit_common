@@ -1,6 +1,6 @@
 {application, rabbit_common,
  [{description, "RabbitMQ Common Libraries"},
-  {vsn, "3.0.2"},
+  {vsn, "3.1.0"},
   {modules, []},
   {registered, []},
   {env, []},

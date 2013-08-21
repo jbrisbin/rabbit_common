@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 -record(user, {username,
@@ -27,9 +27,6 @@
 
 -record(vhost, {virtual_host, dummy}).
 
--record(connection, {protocol, user, timeout_sec, frame_max, vhost,
-                     client_properties, capabilities}).
-
 -record(content,
         {class_id,
          properties, %% either 'none', or a decoded record/tuple
@@ -43,7 +40,7 @@
 -record(resource, {virtual_host, kind, name}).
 
 -record(exchange, {name, type, durable, auto_delete, internal, arguments,
-                   scratches, policy}).
+                   scratches, policy, decorators}).
 -record(exchange_serial, {name, next}).
 
 -record(amqqueue, {name, durable, auto_delete, exclusive_owner = none,
@@ -78,8 +75,7 @@
 
 -record(event, {type, props, timestamp}).
 
--record(message_properties, {expiry, needs_confirming = false,
-                             delivered = false}).
+-record(message_properties, {expiry, needs_confirming = false}).
 
 -record(plugin, {name,          %% atom()
                  version,       %% string()
@@ -90,9 +86,8 @@
 
 %%----------------------------------------------------------------------------
 
--define(COPYRIGHT_MESSAGE, "Copyright (C) 2007-2012 VMware, Inc.").
+-define(COPYRIGHT_MESSAGE, "Copyright (C) 2007-2013 GoPivotal, Inc.").
 -define(INFORMATION_MESSAGE, "Licensed under the MPL.  See http://www.rabbitmq.com/").
--define(PROTOCOL_VERSION, "AMQP 0-9-1 / 0-9 / 0-8").
 -define(ERTS_MINIMUM, "5.6.3").
 
 %% EMPTY_FRAME_SIZE, 8 = 1 + 2 + 4 + 1
