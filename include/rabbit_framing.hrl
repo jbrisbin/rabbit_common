@@ -15,6 +15,10 @@
 %%  The Initial Developer of the Original Code is VMware, Inc.
 %%  Copyright (c) 2007-2012 VMware, Inc.  All rights reserved.
 %%
+
+-ifndef(rabbit_framing_hrl).
+-define(rabbit_framing_hrl, defined).
+
 -define(PROTOCOL_PORT, 5672).
 -define(FRAME_METHOD, 1).
 -define(FRAME_HEADER, 2).
@@ -161,3 +165,5 @@
 -record('P_dtx', {}).
 -record('P_tunnel', {headers, proxy_name, data_name, durable, broadcast}).
 -record('P_test', {}).
+
+-endif. %% rabbit_framing_hrl
