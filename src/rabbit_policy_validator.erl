@@ -14,12 +14,26 @@
 %% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
--include("rabbit.hrl").
+-module(rabbit_policy_validator).
 
 -ifdef(use_specs).
 
--type(msg() :: any()).
+-export_type([validate_results/0]).
+
+-type(validate_results() ::
+        'ok' | {error, string(), [term()]} | [validate_results()]).
+
+-callback validate_policy([{binary(), term()}]) -> validate_results().
+
+-else.
+
+-export([behaviour_info/1]).
+
+behaviour_info(callbacks) ->
+    [
+     {validate_policy, 1}
+    ];
+behaviour_info(_Other) ->
+    undefined.
 
 -endif.
-
--record(msg_location, {msg_id, ref_count, file, offset, total_size}).

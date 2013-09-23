@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is VMware, Inc.
-%% Copyright (c) 2007-2013 VMware, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is GoPivotal, Inc.
+%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
 %%
 
 -module(rabbit_event).
@@ -110,18 +110,18 @@ ensure_stats_timer(C, P, Msg) ->
 
 stop_stats_timer(C, P) ->
     case element(P, C) of
-        #state{level = Level, timer = TRef} = State
-          when Level =/= none andalso TRef =/= undefined ->
-            erlang:cancel_timer(TRef),
-            setelement(P, C, State#state{timer = undefined});
+        #state{timer = TRef} = State when TRef =/= undefined ->
+            case erlang:cancel_timer(TRef) of
+                false -> C;
+                _     -> setelement(P, C, State#state{timer = undefined})
+            end;
         #state{} ->
             C
     end.
 
 reset_stats_timer(C, P) ->
     case element(P, C) of
-        #state{timer = TRef} = State
-          when TRef =/= undefined ->
+        #state{timer = TRef} = State when TRef =/= undefined ->
             setelement(P, C, State#state{timer = undefined});
         #state{} ->
             C
