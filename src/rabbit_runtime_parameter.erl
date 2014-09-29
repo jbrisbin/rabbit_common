@@ -14,12 +14,29 @@
 %% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 
--include("rabbit.hrl").
+-module(rabbit_runtime_parameter).
 
 -ifdef(use_specs).
 
--type(msg() :: any()).
+-type(validate_results() ::
+        'ok' | {error, string(), [term()]} | [validate_results()]).
+
+-callback validate(rabbit_types:vhost(), binary(), binary(),
+                   term(), rabbit_types:user()) -> validate_results().
+-callback notify(rabbit_types:vhost(), binary(), binary(), term()) -> 'ok'.
+-callback notify_clear(rabbit_types:vhost(), binary(), binary()) -> 'ok'.
+
+-else.
+
+-export([behaviour_info/1]).
+
+behaviour_info(callbacks) ->
+    [
+     {validate, 4},
+     {notify, 4},
+     {notify_clear, 3}
+    ];
+behaviour_info(_Other) ->
+    undefined.
 
 -endif.
-
--record(msg_location, {msg_id, ref_count, file, offset, total_size}).
