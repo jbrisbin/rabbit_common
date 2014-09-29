@@ -13,7 +13,7 @@
 %%  The Original Code is RabbitMQ.
 %%
 %%  The Initial Developer of the Original Code is GoPivotal, Inc.
-%%  Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
+%%  Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 -module(rabbit_framing_amqp_0_8).
 -include("rabbit_framing.hrl").
@@ -136,60 +136,60 @@
        | #'test.string_ok'{} | #'test.table'{} | #'test.table_ok'{} | #'test.content'{}
        | #'test.content_ok'{} )).
 -type(amqp_method_field_name() ::
-       ( nowait | delivery_tag | exchange | queue
-       | mandatory | consumer_tag | realm | exclusive
-       | identifier | result | passive | active
-       | queue | no_local | routing_key | write
-       | requeue | read | delivery_tag | routing_key
-       | exchange | ticket | operation | staged_size
-       | exchange | consumer_tag | ticket | ticket
-       | ticket | routing_key | exchange | queue
-       | type | passive | nowait | durable
-       | exchange | auto_delete | no_ack | immediate
-       | internal | exclusive | nowait | prefetch_size
-       | nowait | arguments | string_2 | immediate
-       | operation | mandatory | ticket | message_count
-       | requeue | exchange | exchange | integer_1
-       | content_checksum | if_unused | consumer_tag | nowait
-       | message_count | consume_rate | table | integer_op
-       | integer_result | delivery_tag | delivery_tag | ticket
-       | content_size | queue | queue | passive
-       | durable | exclusive | meta_data | auto_delete
-       | reply_code | exclusive | nowait | consumer_tag
-       | arguments | exchange | ticket | exclusive
-       | queue | message_count | consumer_count | exchange
-       | reply_text | requeue | routing_key | routing_key
-       | ticket | consumer_tag | queue | exchange
-       | routing_key | queue | ticket | nowait
-       | arguments | cluster_id | consumer_tag | nowait
-       | integer_2 | reply_text | mechanism | ticket
-       | queue | string_op | nowait | version_major
-       | consumer_tag | version_minor | response | consumer_tag
-       | server_properties | prefetch_size | global | mechanisms
-       | routing_key | locales | string_result | routing_key
-       | ticket | client_properties | if_unused | consumer_tag
-       | if_empty | nowait | locale | prefetch_count
-       | mandatory | challenge | message_count | response
-       | delivery_tag | immediate | delivery_tag | global
-       | channel_max | frame_max | reply_code | heartbeat
-       | routing_key | identifier | channel_max | delivery_tag
-       | frame_max | consumer_tag | heartbeat | global
-       | nowait | virtual_host | prefetch_size | capabilities
-       | ticket | multiple | insist | redelivered
-       | consumer_tag | prefetch_count | result | integer_3
-       | known_hosts | prefetch_count | host | exchange
-       | known_hosts | arguments | reply_text | requeue
-       | delivery_tag | reply_code | no_ack | reply_text
-       | class_id | consumer_tag | method_id | routing_key
-       | consumer_tag | no_local | routing_key | reply_code
-       | no_ack | multiple | redelivered | redelivered
-       | out_of_band | string_1 | nowait | no_local
-       | active | consumer_tag | ticket | active
-       | ticket | exchange | reply_code | dtx_identifier
-       | reply_text | details | consumer_tag | identifier
-       | queue | exchange | reply_code | queue
-       | reply_text | class_id | method_id | integer_4
-       | exchange | ticket )).
+       ( if_unused | ticket | queue | exchange
+       | table | routing_key | nowait | version_minor
+       | arguments | ticket | client_properties | prefetch_count
+       | requeue | consumer_tag | insist | queue
+       | nowait | reply_text | queue | ticket
+       | consumer_tag | result | queue | ticket
+       | immediate | nowait | ticket | exchange
+       | string_1 | message_count | exchange | staged_size
+       | immediate | response | reply_text | ticket
+       | queue | queue | if_unused | if_empty
+       | exchange | dtx_identifier | nowait | routing_key
+       | prefetch_count | consumer_tag | consumer_tag | prefetch_size
+       | consumer_tag | message_count | durable | consumer_tag
+       | reply_text | delivery_tag | ticket | delivery_tag
+       | queue | ticket | nowait | exchange
+       | host | routing_key | integer_1 | arguments
+       | consume_rate | no_ack | exclusive | nowait
+       | immediate | known_hosts | integer_result | challenge
+       | ticket | content_size | operation | consumer_tag
+       | delivery_tag | queue | meta_data | prefetch_size
+       | prefetch_count | redelivered | consumer_tag | global
+       | exchange | routing_key | exchange | consumer_tag
+       | ticket | consumer_tag | reply_code | routing_key
+       | type | delivery_tag | consumer_tag | routing_key
+       | no_local | no_ack | nowait | exclusive
+       | nowait | routing_key | exclusive | identifier
+       | cluster_id | routing_key | mandatory | consumer_tag
+       | result | nowait | active | exchange
+       | reply_code | class_id | reply_code | durable
+       | delivery_tag | reply_text | content_checksum | details
+       | multiple | identifier | exchange | reply_code
+       | reply_text | consumer_tag | frame_max | global
+       | class_id | method_id | integer_2 | method_id
+       | exchange | routing_key | routing_key | string_result
+       | version_major | realm | exchange | delivery_tag
+       | exclusive | internal | passive | locales
+       | write | read | mandatory | mechanism
+       | queue | routing_key | ticket | reply_code
+       | locale | consumer_tag | ticket | identifier
+       | exchange | response | mandatory | delivery_tag
+       | passive | arguments | channel_max | auto_delete
+       | prefetch_size | heartbeat | multiple | nowait
+       | channel_max | string_2 | frame_max | out_of_band
+       | heartbeat | integer_3 | ticket | string_op
+       | global | virtual_host | capabilities | requeue
+       | nowait | server_properties | requeue | message_count
+       | operation | no_ack | known_hosts | integer_op
+       | reply_code | no_local | ticket | ticket
+       | queue | passive | delivery_tag | redelivered
+       | mechanisms | exchange | reply_text | redelivered
+       | auto_delete | nowait | arguments | requeue
+       | active | exclusive | queue | exchange
+       | message_count | consumer_count | consumer_tag | no_local
+       | active | integer_4 )).
 -type(amqp_property_record() ::
        ( #'P_connection'{} | #'P_channel'{} | #'P_access'{} | #'P_exchange'{}
        | #'P_queue'{} | #'P_basic'{} | #'P_file'{} | #'P_stream'{}
@@ -908,6 +908,8 @@ decode_method_fields('connection.start', <<F0:8/unsigned, F1:8/unsigned, F2Len:3
   #'connection.start'{version_major = F0, version_minor = F1, server_properties = F2, mechanisms = F3, locales = F4};
 decode_method_fields('connection.start_ok', <<F0Len:32/unsigned, F0Tab:F0Len/binary, F1Len:8/unsigned, F1:F1Len/binary, F2Len:32/unsigned, F2:F2Len/binary, F3Len:8/unsigned, F3:F3Len/binary>>) ->
   F0 = rabbit_binary_parser:parse_table(F0Tab),
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F3),
   #'connection.start_ok'{client_properties = F0, mechanism = F1, response = F2, locale = F3};
 decode_method_fields('connection.secure', <<F0Len:32/unsigned, F0:F0Len/binary>>) ->
   #'connection.secure'{challenge = F0};
@@ -918,17 +920,24 @@ decode_method_fields('connection.tune', <<F0:16/unsigned, F1:32/unsigned, F2:16/
 decode_method_fields('connection.tune_ok', <<F0:16/unsigned, F1:32/unsigned, F2:16/unsigned>>) ->
   #'connection.tune_ok'{channel_max = F0, frame_max = F1, heartbeat = F2};
 decode_method_fields('connection.open', <<F0Len:8/unsigned, F0:F0Len/binary, F1Len:8/unsigned, F1:F1Len/binary, F2Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = ((F2Bits band 1) /= 0),
   #'connection.open'{virtual_host = F0, capabilities = F1, insist = F2};
 decode_method_fields('connection.open_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'connection.open_ok'{known_hosts = F0};
 decode_method_fields('connection.redirect', <<F0Len:8/unsigned, F0:F0Len/binary, F1Len:8/unsigned, F1:F1Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
+  rabbit_binary_parser:assert_utf8(F1),
   #'connection.redirect'{host = F0, known_hosts = F1};
 decode_method_fields('connection.close', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2:16/unsigned, F3:16/unsigned>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   #'connection.close'{reply_code = F0, reply_text = F1, class_id = F2, method_id = F3};
 decode_method_fields('connection.close_ok', <<>>) ->
   #'connection.close_ok'{};
 decode_method_fields('channel.open', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'channel.open'{out_of_band = F0};
 decode_method_fields('channel.open_ok', <<>>) ->
   #'channel.open_ok'{};
@@ -939,13 +948,16 @@ decode_method_fields('channel.flow_ok', <<F0Bits:8>>) ->
   F0 = ((F0Bits band 1) /= 0),
   #'channel.flow_ok'{active = F0};
 decode_method_fields('channel.alert', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:32/unsigned, F2Tab:F2Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = rabbit_binary_parser:parse_table(F2Tab),
   #'channel.alert'{reply_code = F0, reply_text = F1, details = F2};
 decode_method_fields('channel.close', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2:16/unsigned, F3:16/unsigned>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   #'channel.close'{reply_code = F0, reply_text = F1, class_id = F2, method_id = F3};
 decode_method_fields('channel.close_ok', <<>>) ->
   #'channel.close_ok'{};
 decode_method_fields('access.request', <<F0Len:8/unsigned, F0:F0Len/binary, F1Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   F1 = ((F1Bits band 1) /= 0),
   F2 = ((F1Bits band 2) /= 0),
   F3 = ((F1Bits band 4) /= 0),
@@ -955,6 +967,8 @@ decode_method_fields('access.request', <<F0Len:8/unsigned, F0:F0Len/binary, F1Bi
 decode_method_fields('access.request_ok', <<F0:16/unsigned>>) ->
   #'access.request_ok'{ticket = F0};
 decode_method_fields('exchange.declare', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8, F8Len:32/unsigned, F8Tab:F8Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
   F3 = ((F3Bits band 1) /= 0),
   F4 = ((F3Bits band 2) /= 0),
   F5 = ((F3Bits band 4) /= 0),
@@ -965,12 +979,14 @@ decode_method_fields('exchange.declare', <<F0:16/unsigned, F1Len:8/unsigned, F1:
 decode_method_fields('exchange.declare_ok', <<>>) ->
   #'exchange.declare_ok'{};
 decode_method_fields('exchange.delete', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = ((F2Bits band 1) /= 0),
   F3 = ((F2Bits band 2) /= 0),
   #'exchange.delete'{ticket = F0, exchange = F1, if_unused = F2, nowait = F3};
 decode_method_fields('exchange.delete_ok', <<>>) ->
   #'exchange.delete_ok'{};
 decode_method_fields('queue.declare', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Bits:8, F7Len:32/unsigned, F7Tab:F7Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = ((F2Bits band 1) /= 0),
   F3 = ((F2Bits band 2) /= 0),
   F4 = ((F2Bits band 4) /= 0),
@@ -979,19 +995,25 @@ decode_method_fields('queue.declare', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1L
   F7 = rabbit_binary_parser:parse_table(F7Tab),
   #'queue.declare'{ticket = F0, queue = F1, passive = F2, durable = F3, exclusive = F4, auto_delete = F5, nowait = F6, arguments = F7};
 decode_method_fields('queue.declare_ok', <<F0Len:8/unsigned, F0:F0Len/binary, F1:32/unsigned, F2:32/unsigned>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'queue.declare_ok'{queue = F0, message_count = F1, consumer_count = F2};
 decode_method_fields('queue.bind', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Len:8/unsigned, F3:F3Len/binary, F4Bits:8, F5Len:32/unsigned, F5Tab:F5Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
+  rabbit_binary_parser:assert_utf8(F3),
   F4 = ((F4Bits band 1) /= 0),
   F5 = rabbit_binary_parser:parse_table(F5Tab),
   #'queue.bind'{ticket = F0, queue = F1, exchange = F2, routing_key = F3, nowait = F4, arguments = F5};
 decode_method_fields('queue.bind_ok', <<>>) ->
   #'queue.bind_ok'{};
 decode_method_fields('queue.purge', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = ((F2Bits band 1) /= 0),
   #'queue.purge'{ticket = F0, queue = F1, nowait = F2};
 decode_method_fields('queue.purge_ok', <<F0:32/unsigned>>) ->
   #'queue.purge_ok'{message_count = F0};
 decode_method_fields('queue.delete', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = ((F2Bits band 1) /= 0),
   F3 = ((F2Bits band 2) /= 0),
   F4 = ((F2Bits band 4) /= 0),
@@ -999,6 +1021,9 @@ decode_method_fields('queue.delete', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Le
 decode_method_fields('queue.delete_ok', <<F0:32/unsigned>>) ->
   #'queue.delete_ok'{message_count = F0};
 decode_method_fields('queue.unbind', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Len:8/unsigned, F3:F3Len/binary, F4Len:32/unsigned, F4Tab:F4Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
+  rabbit_binary_parser:assert_utf8(F3),
   F4 = rabbit_binary_parser:parse_table(F4Tab),
   #'queue.unbind'{ticket = F0, queue = F1, exchange = F2, routing_key = F3, arguments = F4};
 decode_method_fields('queue.unbind_ok', <<>>) ->
@@ -1009,17 +1034,22 @@ decode_method_fields('basic.qos', <<F0:32/unsigned, F1:16/unsigned, F2Bits:8>>) 
 decode_method_fields('basic.qos_ok', <<>>) ->
   #'basic.qos_ok'{};
 decode_method_fields('basic.consume', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
   F3 = ((F3Bits band 1) /= 0),
   F4 = ((F3Bits band 2) /= 0),
   F5 = ((F3Bits band 4) /= 0),
   F6 = ((F3Bits band 8) /= 0),
   #'basic.consume'{ticket = F0, queue = F1, consumer_tag = F2, no_local = F3, no_ack = F4, exclusive = F5, nowait = F6};
 decode_method_fields('basic.consume_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'basic.consume_ok'{consumer_tag = F0};
 decode_method_fields('basic.cancel', <<F0Len:8/unsigned, F0:F0Len/binary, F1Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   F1 = ((F1Bits band 1) /= 0),
   #'basic.cancel'{consumer_tag = F0, nowait = F1};
 decode_method_fields('basic.cancel_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'basic.cancel_ok'{consumer_tag = F0};
 decode_method_fields('basic.publish', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8>>) ->
   F3 = ((F3Bits band 1) /= 0),
@@ -1031,12 +1061,14 @@ decode_method_fields('basic.deliver', <<F0Len:8/unsigned, F0:F0Len/binary, F1:64
   F2 = ((F2Bits band 1) /= 0),
   #'basic.deliver'{consumer_tag = F0, delivery_tag = F1, redelivered = F2, exchange = F3, routing_key = F4};
 decode_method_fields('basic.get', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
   F2 = ((F2Bits band 1) /= 0),
   #'basic.get'{ticket = F0, queue = F1, no_ack = F2};
 decode_method_fields('basic.get_ok', <<F0:64/unsigned, F1Bits:8, F2Len:8/unsigned, F2:F2Len/binary, F3Len:8/unsigned, F3:F3Len/binary, F4:32/unsigned>>) ->
   F1 = ((F1Bits band 1) /= 0),
   #'basic.get_ok'{delivery_tag = F0, redelivered = F1, exchange = F2, routing_key = F3, message_count = F4};
 decode_method_fields('basic.get_empty', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'basic.get_empty'{cluster_id = F0};
 decode_method_fields('basic.ack', <<F0:64/unsigned, F1Bits:8>>) ->
   F1 = ((F1Bits band 1) /= 0),
@@ -1058,32 +1090,45 @@ decode_method_fields('file.qos', <<F0:32/unsigned, F1:16/unsigned, F2Bits:8>>) -
 decode_method_fields('file.qos_ok', <<>>) ->
   #'file.qos_ok'{};
 decode_method_fields('file.consume', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
   F3 = ((F3Bits band 1) /= 0),
   F4 = ((F3Bits band 2) /= 0),
   F5 = ((F3Bits band 4) /= 0),
   F6 = ((F3Bits band 8) /= 0),
   #'file.consume'{ticket = F0, queue = F1, consumer_tag = F2, no_local = F3, no_ack = F4, exclusive = F5, nowait = F6};
 decode_method_fields('file.consume_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'file.consume_ok'{consumer_tag = F0};
 decode_method_fields('file.cancel', <<F0Len:8/unsigned, F0:F0Len/binary, F1Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   F1 = ((F1Bits band 1) /= 0),
   #'file.cancel'{consumer_tag = F0, nowait = F1};
 decode_method_fields('file.cancel_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'file.cancel_ok'{consumer_tag = F0};
 decode_method_fields('file.open', <<F0Len:8/unsigned, F0:F0Len/binary, F1:64/unsigned>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'file.open'{identifier = F0, content_size = F1};
 decode_method_fields('file.open_ok', <<F0:64/unsigned>>) ->
   #'file.open_ok'{staged_size = F0};
 decode_method_fields('file.stage', <<>>) ->
   #'file.stage'{};
 decode_method_fields('file.publish', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8, F5Len:8/unsigned, F5:F5Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
   F3 = ((F3Bits band 1) /= 0),
   F4 = ((F3Bits band 2) /= 0),
+  rabbit_binary_parser:assert_utf8(F5),
   #'file.publish'{ticket = F0, exchange = F1, routing_key = F2, mandatory = F3, immediate = F4, identifier = F5};
 decode_method_fields('file.return', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Len:8/unsigned, F3:F3Len/binary>>) ->
   #'file.return'{reply_code = F0, reply_text = F1, exchange = F2, routing_key = F3};
 decode_method_fields('file.deliver', <<F0Len:8/unsigned, F0:F0Len/binary, F1:64/unsigned, F2Bits:8, F3Len:8/unsigned, F3:F3Len/binary, F4Len:8/unsigned, F4:F4Len/binary, F5Len:8/unsigned, F5:F5Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   F2 = ((F2Bits band 1) /= 0),
+  rabbit_binary_parser:assert_utf8(F3),
+  rabbit_binary_parser:assert_utf8(F4),
+  rabbit_binary_parser:assert_utf8(F5),
   #'file.deliver'{consumer_tag = F0, delivery_tag = F1, redelivered = F2, exchange = F3, routing_key = F4, identifier = F5};
 decode_method_fields('file.ack', <<F0:64/unsigned, F1Bits:8>>) ->
   F1 = ((F1Bits band 1) /= 0),
@@ -1097,16 +1142,21 @@ decode_method_fields('stream.qos', <<F0:32/unsigned, F1:16/unsigned, F2:32/unsig
 decode_method_fields('stream.qos_ok', <<>>) ->
   #'stream.qos_ok'{};
 decode_method_fields('stream.consume', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F1),
+  rabbit_binary_parser:assert_utf8(F2),
   F3 = ((F3Bits band 1) /= 0),
   F4 = ((F3Bits band 2) /= 0),
   F5 = ((F3Bits band 4) /= 0),
   #'stream.consume'{ticket = F0, queue = F1, consumer_tag = F2, no_local = F3, exclusive = F4, nowait = F5};
 decode_method_fields('stream.consume_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'stream.consume_ok'{consumer_tag = F0};
 decode_method_fields('stream.cancel', <<F0Len:8/unsigned, F0:F0Len/binary, F1Bits:8>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   F1 = ((F1Bits band 1) /= 0),
   #'stream.cancel'{consumer_tag = F0, nowait = F1};
 decode_method_fields('stream.cancel_ok', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'stream.cancel_ok'{consumer_tag = F0};
 decode_method_fields('stream.publish', <<F0:16/unsigned, F1Len:8/unsigned, F1:F1Len/binary, F2Len:8/unsigned, F2:F2Len/binary, F3Bits:8>>) ->
   F3 = ((F3Bits band 1) /= 0),
@@ -1133,6 +1183,7 @@ decode_method_fields('dtx.select', <<>>) ->
 decode_method_fields('dtx.select_ok', <<>>) ->
   #'dtx.select_ok'{};
 decode_method_fields('dtx.start', <<F0Len:8/unsigned, F0:F0Len/binary>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'dtx.start'{dtx_identifier = F0};
 decode_method_fields('dtx.start_ok', <<>>) ->
   #'dtx.start_ok'{};
@@ -1144,6 +1195,7 @@ decode_method_fields('test.integer', <<F0:8/unsigned, F1:16/unsigned, F2:32/unsi
 decode_method_fields('test.integer_ok', <<F0:64/unsigned>>) ->
   #'test.integer_ok'{result = F0};
 decode_method_fields('test.string', <<F0Len:8/unsigned, F0:F0Len/binary, F1Len:32/unsigned, F1:F1Len/binary, F2:8/unsigned>>) ->
+  rabbit_binary_parser:assert_utf8(F0),
   #'test.string'{string_1 = F0, string_2 = F1, operation = F2};
 decode_method_fields('test.string_ok', <<F0Len:32/unsigned, F0:F0Len/binary>>) ->
   #'test.string_ok'{result = F0};

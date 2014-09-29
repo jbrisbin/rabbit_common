@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 
 -record(user, {username,
@@ -45,7 +45,7 @@
 
 -record(amqqueue, {name, durable, auto_delete, exclusive_owner = none,
                    arguments, pid, slave_pids, sync_slave_pids, policy,
-                   gm_pids}).
+                   gm_pids, decorators}).
 
 %% mnesia doesn't like unary records, so we add a dummy 'value' field
 -record(route, {binding, value = const}).
@@ -60,7 +60,7 @@
 
 -record(trie_node, {exchange_name, node_id}).
 -record(trie_edge, {exchange_name, node_id, word}).
--record(trie_binding, {exchange_name, node_id, destination}).
+-record(trie_binding, {exchange_name, node_id, destination, arguments}).
 
 -record(listener, {node, protocol, host, ip_address, port}).
 
@@ -70,10 +70,10 @@
                         is_persistent}).
 
 -record(ssl_socket, {tcp, ssl}).
--record(delivery, {mandatory, sender, message, msg_seq_no}).
+-record(delivery, {mandatory, confirm, sender, message, msg_seq_no}).
 -record(amqp_error, {name, explanation = "", method = none}).
 
--record(event, {type, props, timestamp}).
+-record(event, {type, props, reference = undefined, timestamp}).
 
 -record(message_properties, {expiry, needs_confirming = false}).
 
@@ -86,7 +86,7 @@
 
 %%----------------------------------------------------------------------------
 
--define(COPYRIGHT_MESSAGE, "Copyright (C) 2007-2013 GoPivotal, Inc.").
+-define(COPYRIGHT_MESSAGE, "Copyright (C) 2007-2014 GoPivotal, Inc.").
 -define(INFORMATION_MESSAGE, "Licensed under the MPL.  See http://www.rabbitmq.com/").
 -define(ERTS_MINIMUM, "5.6.3").
 
@@ -105,6 +105,29 @@
 -define(DESIRED_HIBERNATE,         10000).
 -define(CREDIT_DISC_BOUND,   {2000, 500}).
 
+%% This is dictated by `erlang:send_after' on which we depend to implement TTL.
+-define(MAX_EXPIRY_TIMER, 4294967295).
+
 -define(INVALID_HEADERS_KEY, <<"x-invalid-headers">>).
 -define(ROUTING_HEADERS, [<<"CC">>, <<"BCC">>]).
 -define(DELETED_HEADER, <<"BCC">>).
+
+%% Trying to send a term across a cluster larger than 2^31 bytes will
+%% cause the VM to exit with "Absurdly large distribution output data
+%% buffer". So we limit the max message size to 2^31 - 10^6 bytes (1MB
+%% to allow plenty of leeway for the #basic_message{} and #content{}
+%% wrapping the message body).
+-define(MAX_MSG_SIZE, 2147383648).
+
+%% First number is maximum size in bytes before we start to
+%% truncate. The following 4-tuple is:
+%%
+%% 1) Maximum size of printable lists and binaries.
+%% 2) Maximum size of any structural term.
+%% 3) Amount to decrease 1) every time we descend while truncating.
+%% 4) Amount to decrease 2) every time we descend while truncating.
+%%
+%% Whole thing feeds into truncate:log_event/2.
+-define(LOG_TRUNC, {100000, {2000, 100, 50, 5}}).
+
+-define(store_proc_name(N), rabbit_misc:store_proc_name(?MODULE, N)).

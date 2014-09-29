@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2013 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
 %%
 
 -module(rabbit_runtime_parameter).
@@ -22,7 +22,7 @@
         'ok' | {error, string(), [term()]} | [validate_results()]).
 
 -callback validate(rabbit_types:vhost(), binary(), binary(),
-                   term()) -> validate_results().
+                   term(), rabbit_types:user()) -> validate_results().
 -callback notify(rabbit_types:vhost(), binary(), binary(), term()) -> 'ok'.
 -callback notify_clear(rabbit_types:vhost(), binary(), binary()) -> 'ok'.
 
