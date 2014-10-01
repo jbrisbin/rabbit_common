@@ -70,6 +70,8 @@
 	 which_children/1, count_children/1,
 	 find_child/2, check_childspecs/1]).
 
+-export([behaviour_info/1]).
+
 %% Internal exports
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -173,6 +175,11 @@
     | ignore.
 -endif.
 -define(restarting(_Pid_), {restarting,_Pid_}).
+
+behaviour_info(callbacks) ->
+    [];
+behaviour_info(_Other) ->
+    undefined.
 
 %%% ---------------------------------------------------
 %%% This is a general process supervisor built upon gen_server.erl.
