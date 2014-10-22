@@ -21,8 +21,8 @@
 -export([method_record_type/1, polite_pause/0, polite_pause/1]).
 -export([die/1, frame_error/2, amqp_error/4, quit/1,
          protocol_error/3, protocol_error/4, protocol_error/1]).
--export([not_found/1, absent/1]).
--export([type_class/1, assert_args_equivalence/4]).
+-export([not_found/1, absent/2]).
+-export([type_class/1, assert_args_equivalence/4, assert_field_equivalence/4]).
 -export([dirty_read/1]).
 -export([table_lookup/2, set_table_value/4]).
 -export([r/3, r/2, r_arg/4, rs/1]).
@@ -42,15 +42,13 @@
 -export([table_filter/3]).
 -export([dirty_read_all/1, dirty_foreach_key/2, dirty_dump_log/1]).
 -export([format/2, format_many/1, format_stderr/2]).
--export([with_local_io/1, local_info_msg/2]).
 -export([unfold/2, ceil/1, queue_fold/3]).
 -export([sort_field_table/1]).
--export([pid_to_string/1, string_to_pid/1]).
+-export([pid_to_string/1, string_to_pid/1, node_to_fake_pid/1]).
 -export([version_compare/2, version_compare/3]).
 -export([version_minor_equivalent/2]).
 -export([dict_cons/3, orddict_cons/3, gb_trees_cons/3]).
 -export([gb_trees_fold/3, gb_trees_foreach/2]).
--export([parse_arguments/3]).
 -export([all_module_attributes/1, build_acyclic_graph/3]).
 -export([now_ms/0]).
 -export([const/1]).
@@ -61,16 +59,17 @@
 -export([append_rpc_all_nodes/4]).
 -export([os_cmd/1]).
 -export([gb_sets_difference/2]).
--export([version/0, which_applications/0]).
+-export([version/0, otp_release/0, which_applications/0]).
 -export([sequence_error/1]).
 -export([json_encode/1, json_decode/1, json_to_term/1, term_to_json/1]).
 -export([check_expiry/1]).
 -export([base64url/1]).
 -export([interval_operation/4]).
--export([ensure_timer/4, stop_timer/2]).
+-export([ensure_timer/4, stop_timer/2, send_after/3, cancel_timer/1]).
 -export([get_parent/0]).
 -export([store_proc_name/1, store_proc_name/2]).
 -export([moving_average/4]).
+-export([now_to_ms/1]).
 
 %% Horrible macro to use in guards
 -define(IS_BENIGN_EXIT(R),
@@ -81,19 +80,19 @@
 
 -ifdef(use_specs).
 
--export_type([resource_name/0, thunk/1]).
+-export_type([resource_name/0, thunk/1, channel_or_connection_exit/0]).
 
 -type(ok_or_error() :: rabbit_types:ok_or_error(any())).
 -type(thunk(T) :: fun(() -> T)).
 -type(resource_name() :: binary()).
--type(optdef() :: flag | {option, string()}).
 -type(channel_or_connection_exit()
       :: rabbit_types:channel_exit() | rabbit_types:connection_exit()).
 -type(digraph_label() :: term()).
 -type(graph_vertex_fun() ::
-        fun ((atom(), [term()]) -> [{digraph:vertex(), digraph_label()}])).
+        fun (({atom(), [term()]}) -> [{digraph:vertex(), digraph_label()}])).
 -type(graph_edge_fun() ::
-        fun ((atom(), [term()]) -> [{digraph:vertex(), digraph:vertex()}])).
+        fun (({atom(), [term()]}) -> [{digraph:vertex(), digraph:vertex()}])).
+-type(tref() :: {'erlang', reference()} | {timer, timer:tref()}).
 
 -spec(method_record_type/1 :: (rabbit_framing:amqp_method_record())
                               -> rabbit_framing:amqp_method_name()).
@@ -118,12 +117,19 @@
 -spec(protocol_error/1 ::
         (rabbit_types:amqp_error()) -> channel_or_connection_exit()).
 -spec(not_found/1 :: (rabbit_types:r(atom())) -> rabbit_types:channel_exit()).
--spec(absent/1 :: (rabbit_types:amqqueue()) -> rabbit_types:channel_exit()).
+-spec(absent/2 :: (rabbit_types:amqqueue(), rabbit_amqqueue:absent_reason())
+                  -> rabbit_types:channel_exit()).
 -spec(type_class/1 :: (rabbit_framing:amqp_field_type()) -> atom()).
 -spec(assert_args_equivalence/4 :: (rabbit_framing:amqp_table(),
                                     rabbit_framing:amqp_table(),
                                     rabbit_types:r(any()), [binary()]) ->
                                         'ok' | rabbit_types:connection_exit()).
+-spec(assert_field_equivalence/4 ::
+        (any(), any(), rabbit_types:r(any()), atom() | binary()) ->
+                                         'ok' | rabbit_types:connection_exit()).
+-spec(equivalence_fail/4 ::
+        (any(), any(), rabbit_types:r(any()), atom() | binary()) ->
+                                 rabbit_types:connection_exit()).
 -spec(dirty_read/1 ::
         ({atom(), any()}) -> rabbit_types:ok_or_error2(any(), 'not_found')).
 -spec(table_lookup/2 ::
@@ -183,36 +189,31 @@
 -spec(format/2 :: (string(), [any()]) -> string()).
 -spec(format_many/1 :: ([{string(), [any()]}]) -> string()).
 -spec(format_stderr/2 :: (string(), [any()]) -> 'ok').
--spec(with_local_io/1 :: (fun (() -> A)) -> A).
--spec(local_info_msg/2 :: (string(), [any()]) -> 'ok').
 -spec(unfold/2  :: (fun ((A) -> ({'true', B, A} | 'false')), A) -> {[B], A}).
 -spec(ceil/1 :: (number()) -> integer()).
--spec(queue_fold/3 :: (fun ((any(), B) -> B), B, queue()) -> B).
+-spec(queue_fold/3 :: (fun ((any(), B) -> B), B, queue:queue()) -> B).
 -spec(sort_field_table/1 ::
         (rabbit_framing:amqp_table()) -> rabbit_framing:amqp_table()).
 -spec(pid_to_string/1 :: (pid()) -> string()).
 -spec(string_to_pid/1 :: (string()) -> pid()).
+-spec(node_to_fake_pid/1 :: (atom()) -> pid()).
 -spec(version_compare/2 :: (string(), string()) -> 'lt' | 'eq' | 'gt').
 -spec(version_compare/3 ::
         (string(), string(), ('lt' | 'lte' | 'eq' | 'gte' | 'gt'))
         -> boolean()).
 -spec(version_minor_equivalent/2 :: (string(), string()) -> boolean()).
--spec(dict_cons/3 :: (any(), any(), dict()) -> dict()).
+-spec(dict_cons/3 :: (any(), any(), dict:dict()) -> dict:dict()).
 -spec(orddict_cons/3 :: (any(), any(), orddict:orddict()) -> orddict:orddict()).
--spec(gb_trees_cons/3 :: (any(), any(), gb_tree()) -> gb_tree()).
--spec(gb_trees_fold/3 :: (fun ((any(), any(), A) -> A), A, gb_tree()) -> A).
+-spec(gb_trees_cons/3 :: (any(), any(), gb_trees:tree()) -> gb_trees:tree()).
+-spec(gb_trees_fold/3 :: (fun ((any(), any(), A) -> A), A, gb_trees:tree())
+ -> A).
 -spec(gb_trees_foreach/2 ::
-        (fun ((any(), any()) -> any()), gb_tree()) -> 'ok').
--spec(parse_arguments/3 ::
-        ([{atom(), [{string(), optdef()}]} | atom()],
-         [{string(), optdef()}],
-         [string()])
-        -> {'ok', {atom(), [{string(), string()}], [string()]}} |
-           'no_command').
--spec(all_module_attributes/1 :: (atom()) -> [{atom(), [term()]}]).
+        (fun ((any(), any()) -> any()), gb_trees:tree()) -> 'ok').
+-spec(all_module_attributes/1 ::
+        (atom()) -> [{atom(), atom(), [term()]}]).
 -spec(build_acyclic_graph/3 ::
         (graph_vertex_fun(), graph_edge_fun(), [{atom(), [term()]}])
-        -> rabbit_types:ok_or_error2(digraph(),
+        -> rabbit_types:ok_or_error2(digraph:digraph(),
                                      {'vertex', 'duplicate', digraph:vertex()} |
                                      {'edge', ({bad_vertex, digraph:vertex()} |
                                                {bad_edge, [digraph:vertex()]}),
@@ -229,8 +230,9 @@
 -spec(format_message_queue/2 :: (any(), priority_queue:q()) -> term()).
 -spec(append_rpc_all_nodes/4 :: ([node()], atom(), atom(), [any()]) -> [any()]).
 -spec(os_cmd/1 :: (string()) -> string()).
--spec(gb_sets_difference/2 :: (gb_set(), gb_set()) -> gb_set()).
+-spec(gb_sets_difference/2 :: (gb_sets:set(), gb_sets:set()) -> gb_sets:set()).
 -spec(version/0 :: () -> string()).
+-spec(otp_release/0 :: () -> string()).
 -spec(which_applications/0 :: () -> [{atom(), string(), string()}]).
 -spec(sequence_error/1 :: ([({'error', any()} | any())])
                        -> {'error', any()} | any()).
@@ -245,11 +247,16 @@
         -> {any(), non_neg_integer()}).
 -spec(ensure_timer/4 :: (A, non_neg_integer(), non_neg_integer(), any()) -> A).
 -spec(stop_timer/2 :: (A, non_neg_integer()) -> A).
+-spec(send_after/3 :: (non_neg_integer(), pid(), any()) -> tref()).
+-spec(cancel_timer/1 :: (tref()) -> 'ok').
 -spec(get_parent/0 :: () -> pid()).
 -spec(store_proc_name/2 :: (atom(), rabbit_types:proc_name()) -> ok).
 -spec(store_proc_name/1 :: (rabbit_types:proc_type_and_name()) -> ok).
 -spec(moving_average/4 :: (float(), float(), float(), float() | 'undefined')
                           -> float()).
+-spec(now_to_ms/1 :: ({non_neg_integer(),
+                       non_neg_integer(),
+                       non_neg_integer()}) -> pos_integer()).
 -endif.
 
 %%----------------------------------------------------------------------------
@@ -286,14 +293,18 @@ protocol_error(#amqp_error{} = Error) ->
 
 not_found(R) -> protocol_error(not_found, "no ~s", [rs(R)]).
 
-absent(#amqqueue{name = QueueName, pid = QPid, durable = true}) ->
+absent(#amqqueue{name = QueueName, pid = QPid, durable = true}, nodedown) ->
     %% The assertion of durability is mainly there because we mention
     %% durability in the error message. That way we will hopefully
     %% notice if at some future point our logic changes s.t. we get
     %% here with non-durable queues.
     protocol_error(not_found,
                    "home node '~s' of durable ~s is down or inaccessible",
-                   [node(QPid), rs(QueueName)]).
+                   [node(QPid), rs(QueueName)]);
+
+absent(#amqqueue{name = QueueName}, crashed) ->
+    protocol_error(not_found,
+                   "~s has crashed and failed to restart", [rs(QueueName)]).
 
 type_class(byte)      -> int;
 type_class(short)     -> int;
@@ -310,11 +321,6 @@ assert_args_equivalence(Orig, New, Name, Keys) ->
 
 assert_args_equivalence1(Orig, New, Name, Key) ->
     {Orig1, New1} = {table_lookup(Orig, Key), table_lookup(New, Key)},
-    FailureFun = fun () ->
-                     protocol_error(precondition_failed, "inequivalent arg '~s'"
-                                    "for ~s: received ~s but current is ~s",
-                                    [Key, rs(Name), val(New1), val(Orig1)])
-                 end,
     case {Orig1, New1} of
         {Same, Same} ->
             ok;
@@ -322,11 +328,21 @@ assert_args_equivalence1(Orig, New, Name, Key) ->
             case type_class(OrigType) == type_class(NewType) andalso
                  OrigVal == NewVal of
                  true  -> ok;
-                 false -> FailureFun()
+                 false -> assert_field_equivalence(OrigVal, NewVal, Name, Key)
             end;
         {_, _} ->
-            FailureFun()
+            assert_field_equivalence(Orig, New, Name, Key)
     end.
+
+assert_field_equivalence(_Orig, _Orig, _Name, _Key) ->
+    ok;
+assert_field_equivalence(Orig, New, Name, Key) ->
+    equivalence_fail(Orig, New, Name, Key).
+
+equivalence_fail(Orig, New, Name, Key) ->
+    protocol_error(precondition_failed, "inequivalent arg '~s' "
+                   "for ~s: received ~s but current is ~s",
+                   [Key, rs(Name), val(New), val(Orig)]).
 
 val(undefined) ->
     "none";
@@ -335,7 +351,12 @@ val({Type, Value}) ->
                  true  -> "~s";
                  false -> "~w"
              end,
-    format("the value '" ++ ValFmt ++ "' of type '~s'", [Value, Type]).
+    format("the value '" ++ ValFmt ++ "' of type '~s'", [Value, Type]);
+val(Value) ->
+    format(case is_binary(Value) of
+               true  -> "'~s'";
+               false -> "'~w'"
+           end, [Value]).
 
 %% Normally we'd call mnesia:dirty_read/1 here, but that is quite
 %% expensive due to general mnesia overheads (figuring out table types
@@ -504,7 +525,7 @@ execute_mnesia_transaction(TxFun) ->
                                 end;
                        true  -> mnesia:sync_transaction(TxFun)
                    end
-           end) of
+           end, single) of
         {sync, {atomic,  Result}} -> mnesia_sync:sync(), Result;
         {sync, {aborted, Reason}} -> throw({error, Reason});
         {atomic,  Result}         -> Result;
@@ -635,23 +656,6 @@ format_stderr(Fmt, Args) ->
     end,
     ok.
 
-%% Execute Fun using the IO system of the local node (i.e. the node on
-%% which the code is executing).
-with_local_io(Fun) ->
-    GL = group_leader(),
-    group_leader(whereis(user), self()),
-    try
-        Fun()
-    after
-        group_leader(GL, self())
-    end.
-
-%% Log an info message on the local node using the standard logger.
-%% Use this if rabbit isn't running and the call didn't originate on
-%% the local node (e.g. rabbitmqctl calls).
-local_info_msg(Format, Args) ->
-    with_local_io(fun () -> error_logger:info_msg(Format, Args) end).
-
 unfold(Fun, Init) ->
     unfold(Fun, [], Init).
 
@@ -704,6 +708,10 @@ string_to_pid(Str) ->
         nomatch ->
             throw(Err)
     end.
+
+%% node(node_to_fake_pid(Node)) =:= Node.
+node_to_fake_pid(Node) ->
+    string_to_pid(format("<~s.0.0.0>", [Node])).
 
 version_compare(A, B, lte) ->
     case version_compare(A, B) of
@@ -775,64 +783,6 @@ gb_trees_fold1(Fun, Acc, {Key, Val, It}) ->
 gb_trees_foreach(Fun, Tree) ->
     gb_trees_fold(fun (Key, Val, Acc) -> Fun(Key, Val), Acc end, ok, Tree).
 
-%% Takes:
-%%    * A list of [{atom(), [{string(), optdef()]} | atom()], where the atom()s
-%%      are the accepted commands and the optional [string()] is the list of
-%%      accepted options for that command
-%%    * A list [{string(), optdef()}] of options valid for all commands
-%%    * The list of arguments given by the user
-%%
-%% Returns either {ok, {atom(), [{string(), string()}], [string()]} which are
-%% respectively the command, the key-value pairs of the options and the leftover
-%% arguments; or no_command if no command could be parsed.
-parse_arguments(Commands, GlobalDefs, As) ->
-    lists:foldl(maybe_process_opts(GlobalDefs, As), no_command, Commands).
-
-maybe_process_opts(GDefs, As) ->
-    fun({C, Os}, no_command) ->
-            process_opts(atom_to_list(C), dict:from_list(GDefs ++ Os), As);
-       (C, no_command) ->
-            (maybe_process_opts(GDefs, As))({C, []}, no_command);
-       (_, {ok, Res}) ->
-            {ok, Res}
-    end.
-
-process_opts(C, Defs, As0) ->
-    KVs0 = dict:map(fun (_, flag)        -> false;
-                        (_, {option, V}) -> V
-                    end, Defs),
-    process_opts(Defs, C, As0, not_found, KVs0, []).
-
-%% Consume flags/options until you find the correct command. If there are no
-%% arguments or the first argument is not the command we're expecting, fail.
-%% Arguments to this are: definitions, cmd we're looking for, args we
-%% haven't parsed, whether we have found the cmd, options we've found,
-%% plain args we've found.
-process_opts(_Defs, C, [], found, KVs, Outs) ->
-    {ok, {list_to_atom(C), dict:to_list(KVs), lists:reverse(Outs)}};
-process_opts(_Defs, _C, [], not_found, _, _) ->
-    no_command;
-process_opts(Defs, C, [A | As], Found, KVs, Outs) ->
-    OptType = case dict:find(A, Defs) of
-                  error             -> none;
-                  {ok, flag}        -> flag;
-                  {ok, {option, _}} -> option
-              end,
-    case {OptType, C, Found} of
-        {flag, _, _}     -> process_opts(
-                              Defs, C, As, Found, dict:store(A, true, KVs),
-                              Outs);
-        {option, _, _}   -> case As of
-                                []        -> no_command;
-                                [V | As1] -> process_opts(
-                                               Defs, C, As1, Found,
-                                               dict:store(A, V, KVs), Outs)
-                            end;
-        {none, A, _}     -> process_opts(Defs, C, As, found, KVs, Outs);
-        {none, _, found} -> process_opts(Defs, C, As, found, KVs, [A | Outs]);
-        {none, _, _}     -> no_command
-    end.
-
 now_ms() ->
     timer:now_diff(now(), {0,0,0}) div 1000.
 
@@ -849,20 +799,20 @@ module_attributes(Module) ->
     end.
 
 all_module_attributes(Name) ->
-    Modules =
+    Targets =
         lists:usort(
           lists:append(
-            [Modules || {App, _, _}   <- application:loaded_applications(),
-                        {ok, Modules} <- [application:get_key(App, modules)]])),
+            [[{App, Module} || Module <- Modules] ||
+                {App, _, _}   <- application:loaded_applications(),
+                {ok, Modules} <- [application:get_key(App, modules)]])),
     lists:foldl(
-      fun (Module, Acc) ->
+      fun ({App, Module}, Acc) ->
               case lists:append([Atts || {N, Atts} <- module_attributes(Module),
                                          N =:= Name]) of
                   []   -> Acc;
-                  Atts -> [{Module, Atts} | Acc]
+                  Atts -> [{App, Module, Atts} | Acc]
               end
-      end, [], Modules).
-
+      end, [], Targets).
 
 build_acyclic_graph(VertexFun, EdgeFun, Graph) ->
     G = digraph:new([acyclic]),
@@ -870,13 +820,13 @@ build_acyclic_graph(VertexFun, EdgeFun, Graph) ->
         [case digraph:vertex(G, Vertex) of
              false -> digraph:add_vertex(G, Vertex, Label);
              _     -> ok = throw({graph_error, {vertex, duplicate, Vertex}})
-         end || {Module, Atts}  <- Graph,
-                {Vertex, Label} <- VertexFun(Module, Atts)],
+         end || GraphElem       <- Graph,
+                {Vertex, Label} <- VertexFun(GraphElem)],
         [case digraph:add_edge(G, From, To) of
              {error, E} -> throw({graph_error, {edge, E, From, To}});
              _          -> ok
-         end || {Module, Atts} <- Graph,
-                {From, To}     <- EdgeFun(Module, Atts)],
+         end || GraphElem  <- Graph,
+                {From, To} <- EdgeFun(GraphElem)],
         {ok, G}
     catch {graph_error, Reason} ->
             true = digraph:delete(G),
@@ -902,10 +852,14 @@ ntoab(IP) ->
 %% We try to avoid reconnecting to down nodes here; this is used in a
 %% loop in rabbit_amqqueue:on_node_down/1 and any delays we incur
 %% would be bad news.
+%%
+%% See also rabbit_mnesia:is_process_alive/1 which also requires the
+%% process be in the same running cluster as us (i.e. not partitioned
+%% or some random node).
 is_process_alive(Pid) ->
     Node = node(Pid),
     lists:member(Node, [node() | nodes()]) andalso
-	rpc:call(Node, erlang, is_process_alive, [Pid]) =:= true.
+        rpc:call(Node, erlang, is_process_alive, [Pid]) =:= true.
 
 pget(K, P) -> proplists:get_value(K, P).
 pget(K, P, D) -> proplists:get_value(K, P, D).
@@ -968,6 +922,20 @@ version() ->
     {ok, VSN} = application:get_key(rabbit, vsn),
     VSN.
 
+%% See http://www.erlang.org/doc/system_principles/versions.html
+otp_release() ->
+    File = filename:join([code:root_dir(), "releases",
+                          erlang:system_info(otp_release), "OTP_VERSION"]),
+    case file:read_file(File) of
+        {ok, VerBin} ->
+            %% 17.0 or later, we need the file for the minor version
+            string:strip(binary_to_list(VerBin), both, $\n);
+        {error, _} ->
+            %% R16B03 or earlier (no file, otp_release is correct)
+            %% or we couldn't read the file (so this is best we can do)
+            erlang:system_info(otp_release)
+    end.
+
 %% application:which_applications(infinity) is dangerous, since it can
 %% cause deadlocks on shutdown. So we have to use a timeout variant,
 %% but w/o creating spurious timeout errors.
@@ -1017,7 +985,9 @@ term_to_json(V) when is_binary(V) orelse is_number(V) orelse V =:= null orelse
                      V =:= true orelse V =:= false ->
     V.
 
-check_expiry(N) when N > ?MAX_EXPIRY_TIMER -> {error, {value_too_big, N}};
+now_to_ms({Mega, Sec, Micro}) ->
+    (Mega * 1000000 * 1000000 + Sec * 1000000 + Micro) div 1000.
+
 check_expiry(N) when N < 0                 -> {error, {value_negative, N}};
 check_expiry(_N)                           -> ok.
 
@@ -1045,7 +1015,7 @@ interval_operation({M, F, A}, MaxRatio, IdealInterval, LastInterval) ->
 
 ensure_timer(State, Idx, After, Msg) ->
     case element(Idx, State) of
-        undefined -> TRef = erlang:send_after(After, self(), Msg),
+        undefined -> TRef = send_after(After, self(), Msg),
                      setelement(Idx, State, TRef);
         _         -> State
     end.
@@ -1053,11 +1023,24 @@ ensure_timer(State, Idx, After, Msg) ->
 stop_timer(State, Idx) ->
     case element(Idx, State) of
         undefined -> State;
-        TRef      -> case erlang:cancel_timer(TRef) of
-                         false -> State;
-                         _     -> setelement(Idx, State, undefined)
-                     end
+        TRef      -> cancel_timer(TRef),
+                     setelement(Idx, State, undefined)
     end.
+
+%% timer:send_after/3 goes through a single timer process but allows
+%% long delays. erlang:send_after/3 does not have a bottleneck but
+%% only allows max 2^32-1 millis.
+-define(MAX_ERLANG_SEND_AFTER, 4294967295).
+send_after(Millis, Pid, Msg) when Millis > ?MAX_ERLANG_SEND_AFTER ->
+    {ok, Ref} = timer:send_after(Millis, Pid, Msg),
+    {timer, Ref};
+send_after(Millis, Pid, Msg) ->
+    {erlang, erlang:send_after(Millis, Pid, Msg)}.
+
+cancel_timer({erlang, Ref}) -> erlang:cancel_timer(Ref),
+                               ok;
+cancel_timer({timer, Ref})  -> {ok, cancel} = timer:cancel(Ref),
+                               ok.
 
 store_proc_name(Type, ProcName) -> store_proc_name({Type, ProcName}).
 store_proc_name(TypeProcName)   -> put(process_name, TypeProcName).
