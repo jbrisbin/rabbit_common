@@ -70,8 +70,6 @@
 	 which_children/1, count_children/1,
 	 find_child/2, check_childspecs/1]).
 
--export([behaviour_info/1]).
-
 %% Internal exports
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
 	 terminate/2, code_change/3]).
@@ -139,7 +137,7 @@
 -record(state, {name,
 		strategy               :: strategy(),
 		children = []          :: [child_rec()],
-		dynamics               :: ?DICT() | ?SET(),
+		dynamics               :: ?DICT:?DICT() | ?SET:?SET(),
 		intensity              :: non_neg_integer(),
 		period                 :: pos_integer(),
 		restarts = [],
@@ -173,13 +171,17 @@
            MaxT            :: non_neg_integer()},
            [ChildSpec :: child_spec()]}}
     | ignore.
--endif.
--define(restarting(_Pid_), {restarting,_Pid_}).
+-else.
+
+-export([behaviour_info/1]).
 
 behaviour_info(callbacks) ->
-    [];
+    [{init,1}];
 behaviour_info(_Other) ->
     undefined.
+
+-endif.
+-define(restarting(_Pid_), {restarting,_Pid_}).
 
 %%% ---------------------------------------------------
 %%% This is a general process supervisor built upon gen_server.erl.
