@@ -1003,7 +1003,7 @@ sequence_error([_ | Rest])               -> sequence_error(Rest).
 
 json_encode(Term) ->
     try
-        {ok, mochijson2:encode(Term)}
+        {ok, rc_mochijson2:encode(Term)}
     catch
         exit:{json_encode, E} ->
             {error, E}
@@ -1011,7 +1011,7 @@ json_encode(Term) ->
 
 json_decode(Term) ->
     try
-        {ok, mochijson2:decode(Term)}
+        {ok, rc_mochijson2:decode(Term)}
     catch
         %% Sadly `mochijson2:decode/1' does not offer a nice way to catch
         %% decoding errors...
