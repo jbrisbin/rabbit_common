@@ -15,6 +15,38 @@
 %%
 
 -module(rabbit_channel).
+
+%% rabbit_channel processes represent an AMQP 0-9-1 channels.
+%%
+%% Connections parse protocol frames coming from clients and
+%% dispatch them to channel processes.
+%% Channels are responsible for implementing the logic behind
+%% the various protocol methods, involving other processes as
+%% needed:
+%%
+%%  * Routing messages (using functions in various exchange type
+%%    modules) to queue processes.
+%%  * Managing queues, exchanges, and bindings.
+%%  * Keeping track of consumers
+%%  * Keeping track of unacknowledged deliveries to consumers
+%%  * Keeping track of publisher confirms
+%%  * Keeping track of mandatory message routing confirmations
+%%    and returns
+%%  * Transaction management
+%%  * Authorisation (enforcing permissions)
+%%  * Publishing trace events if tracing is enabled
+%%
+%% Every channel has a number of dependent processes:
+%%
+%%  * A writer which is responsible for sending frames to clients.
+%%  * A limiter which controls how many messages can delivered
+%%    to consumers according to active QoS prefetch and internal
+%%    flow control logic.
+%%
+%% Channels are also aware of their connection's queue collector.
+%% When a queue is declared as exclusive on a channel, the channel
+%% will notify queue collector of that queue.
+
 -include("rabbit_framing.hrl").
 -include("rabbit.hrl").
 
@@ -33,14 +65,84 @@
 %% Internal
 -export([list_local/0, deliver_reply_local/3]).
 
--record(ch, {state, protocol, channel, reader_pid, writer_pid, conn_pid,
-             conn_name, limiter, tx, next_tag, unacked_message_q, user,
-             virtual_host, most_recently_declared_queue,
-             queue_names, queue_monitors, consumer_mapping,
-             queue_consumers, delivering_queues,
-             queue_collector_pid, stats_timer, confirm_enabled, publish_seqno,
-             unconfirmed, confirmed, mandatory, capabilities, trace_state,
-             consumer_prefetch, reply_consumer}).
+-record(ch, {
+  %% starting | running | flow | closing
+  state,
+  %% same as reader's protocol. Used when instantiating
+  %% (protocol) exceptions.
+  protocol,
+  %% channel number
+  channel,
+  %% reader process
+  reader_pid,
+  %% writer process
+  writer_pid,
+  %%
+  conn_pid,
+  %% same as reader's name, see #v1.name
+  %% in rabbit_reader
+  conn_name,
+  %% limiter pid, see rabbit_limiter
+  limiter,
+  %% none | {Msgs, Acks} | committing | failed |
+  tx,
+  %% (consumer) delivery tag sequence
+  next_tag,
+  %% messages pending consumer acknowledgement
+  unacked_message_q,
+  %% same as #v1.user in the reader, used in
+  %% authorisation checks
+  user,
+  %% same as #v1.user in the reader
+  virtual_host,
+  %% when queue.bind's queue field is empty,
+  %% this name will be used instead
+  most_recently_declared_queue,
+  %% a dictionary of queue pid to queue name
+  queue_names,
+  %% queue processes are monitored to update
+  %% queue names
+  queue_monitors,
+  %% a dictionary of consumer tags to
+  %% consumer details: #amqqueue record, acknowledgement mode,
+  %% consumer exclusivity, etc
+  consumer_mapping,
+  %% a dictionary of queue pids to consumer tag lists
+  queue_consumers,
+  %% a set of pids of queues that have unacknowledged
+  %% deliveries
+  delivering_queues,
+  %% when a queue is declared as exclusive, queue
+  %% collector must be notified.
+  %% see rabbit_queue_collector for more info.
+  queue_collector_pid,
+  %% timer used to emit statistics
+  stats_timer,
+  %% are publisher confirms enabled for this channel?
+  confirm_enabled,
+  %% publisher confirm delivery tag sequence
+  publish_seqno,
+  %% a dtree used to track unconfirmed
+  %% (to publishers) messages
+  unconfirmed,
+  %% a list of tags for published messages that were
+  %% delivered but are yet to be confirmed to the client
+  confirmed,
+  %% a dtree used to track oustanding notifications
+  %% for messages published as mandatory
+  mandatory,
+  %% same as capabilities in the reader
+  capabilities,
+  %% tracing exchange resource if tracing is enabled,
+  %% 'none' otherwise
+  trace_state,
+  consumer_prefetch,
+  %% used by "one shot RPC" (amq.
+  reply_consumer,
+  %% flow | noflow, see rabbitmq-server#114
+  delivery_flow
+}).
+
 
 -define(MAX_PERMISSION_CACHE_SIZE, 12).
 
@@ -235,6 +337,10 @@ init([Channel, ReaderPid, WriterPid, ConnPid, ConnName, Protocol, User, VHost,
     process_flag(trap_exit, true),
     ?store_proc_name({ConnName, Channel}),
     ok = pg_local:join(rabbit_channels, self()),
+    Flow = case rabbit_misc:get_env(rabbit, mirroring_flow_control, true) of
+             true   -> flow;
+             false  -> noflow
+           end,
     State = #ch{state                   = starting,
                 protocol                = Protocol,
                 channel                 = Channel,
@@ -263,7 +369,8 @@ init([Channel, ReaderPid, WriterPid, ConnPid, ConnName, Protocol, User, VHost,
                 capabilities            = Capabilities,
                 trace_state             = rabbit_trace:init(VHost),
                 consumer_prefetch       = 0,
-                reply_consumer          = none},
+                reply_consumer          = none,
+                delivery_flow           = Flow},
     State1 = rabbit_event:init_stats_timer(State, #ch.stats_timer),
     rabbit_event:notify(channel_created, infos(?CREATION_EVENT_KEYS, State1)),
     rabbit_event:if_enabled(State1, #ch.stats_timer,
@@ -484,6 +591,8 @@ format_message_queue(Opt, MQ) -> rabbit_misc:format_message_queue(Opt, MQ).
 
 %%---------------------------------------------------------------------------
 
+log(Level, Fmt, Args) -> rabbit_log:log(channel, Level, Fmt, Args).
+
 reply(Reply, NewState) -> {reply, Reply, next_state(NewState), hibernate}.
 
 noreply(NewState) -> {noreply, next_state(NewState), hibernate}.
@@ -520,10 +629,10 @@ handle_exception(Reason, State = #ch{protocol     = Protocol,
     {_Result, State1} = notify_queues(State),
     case rabbit_binary_generator:map_exception(Channel, Reason, Protocol) of
         {Channel, CloseMethod} ->
-            rabbit_log:error("Channel error on connection ~p (~s, vhost: '~s',"
-                             " user: '~s'), channel ~p:~n~p~n",
-                             [ConnPid, ConnName, VHost, User#user.username,
-                              Channel, Reason]),
+            log(error, "Channel error on connection ~p (~s, vhost: '~s',"
+                       " user: '~s'), channel ~p:~n~p~n",
+                       [ConnPid, ConnName, VHost, User#user.username,
+                        Channel, Reason]),
             ok = rabbit_writer:send_command(WriterPid, CloseMethod),
             {noreply, State1};
         {0, _} ->
@@ -768,7 +877,8 @@ handle_method(#'basic.publish'{exchange    = ExchangeNameBin,
                                    confirm_enabled = ConfirmEnabled,
                                    trace_state     = TraceState,
                                    user            = #user{username = Username},
-                                   conn_name       = ConnName}) ->
+                                   conn_name       = ConnName,
+                                   delivery_flow   = Flow}) ->
     check_msg_size(Content),
     ExchangeName = rabbit_misc:r(VHostPath, exchange, ExchangeNameBin),
     check_write_permitted(ExchangeName, State),
@@ -795,7 +905,7 @@ handle_method(#'basic.publish'{exchange    = ExchangeNameBin,
             QNames = rabbit_exchange:route(Exchange, Delivery),
             rabbit_trace:tap_in(Message, QNames, ConnName, ChannelNum,
                                 Username, TraceState),
-            DQ = {Delivery#delivery{flow = flow}, QNames},
+            DQ = {Delivery#delivery{flow = Flow}, QNames},
             {noreply, case Tx of
                           none         -> deliver_to_queues(DQ, State1);
                           {Msgs, Acks} -> Msgs1 = queue:in(DQ, Msgs),
