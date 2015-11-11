@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_amqqueue).
@@ -24,10 +24,11 @@
          assert_equivalence/5,
          check_exclusive_access/2, with_exclusive_access_or_die/3,
          stat/1, deliver/2, requeue/3, ack/3, reject/4]).
--export([list/0, list/1, info_keys/0, info/1, info/2, info_all/1, info_all/2]).
+-export([list/0, list/1, info_keys/0, info/1, info/2, info_all/1, info_all/2,
+         info_all/4]).
 -export([list_down/1]).
 -export([force_event_refresh/1, notify_policy_changed/1]).
--export([consumers/1, consumers_all/1, consumer_info_keys/0]).
+-export([consumers/1, consumers_all/1,  consumers_all/3, consumer_info_keys/0]).
 -export([basic_get/4, basic_consume/10, basic_cancel/4, notify_decorators/1]).
 -export([notify_sent/2, notify_sent_queue_down/1, resume/2]).
 -export([notify_down_all/2, activate_limit_all/2, credit/5]).
@@ -118,6 +119,8 @@
 -spec(info_all/1 :: (rabbit_types:vhost()) -> [rabbit_types:infos()]).
 -spec(info_all/2 :: (rabbit_types:vhost(), rabbit_types:info_keys())
                     -> [rabbit_types:infos()]).
+-spec(info_all/4 :: (rabbit_types:vhost(), rabbit_types:info_keys(),
+                     reference(), pid()) -> 'ok').
 -spec(force_event_refresh/1 :: (reference()) -> 'ok').
 -spec(notify_policy_changed/1 :: (rabbit_types:amqqueue()) -> 'ok').
 -spec(consumers/1 :: (rabbit_types:amqqueue())
@@ -128,6 +131,9 @@
         (rabbit_types:vhost())
         -> [{name(), pid(), rabbit_types:ctag(), boolean(),
              non_neg_integer(), rabbit_framing:amqp_table()}]).
+-spec(consumers_all/3 ::
+        (rabbit_types:vhost(), reference(), pid())
+        -> 'ok').
 -spec(stat/1 ::
         (rabbit_types:amqqueue())
         -> {'ok', non_neg_integer(), non_neg_integer()}).
@@ -274,9 +280,15 @@ declare(QueueName, Durable, AutoDelete, Args, Owner, Node) ->
                                       recoverable_slaves = [],
                                       gm_pids            = [],
                                       state              = live})),
-    Node = rabbit_mirror_queue_misc:initial_queue_node(Q, Node),
+
+    Node1 = case rabbit_queue_master_location_misc:get_location(Q)  of
+              {ok, Node0}  -> Node0;
+              {error, _}   -> Node
+            end,
+
+    Node1 = rabbit_mirror_queue_misc:initial_queue_node(Q, Node1),
     gen_server2:call(
-      rabbit_amqqueue_sup_sup:start_queue_process(Node, Q, declare),
+      rabbit_amqqueue_sup_sup:start_queue_process(Node1, Q, declare),
       {init, new}, infinity).
 
 internal_declare(Q, true) ->
@@ -580,6 +592,14 @@ info_all(VHostPath, Items) ->
     map(list(VHostPath), fun (Q) -> info(Q, Items) end) ++
         map(list_down(VHostPath), fun (Q) -> info_down(Q, Items, down) end).
 
+info_all(VHostPath, Items, Ref, AggregatorPid) ->
+    rabbit_control_misc:emitting_map_with_exit_handler(
+      AggregatorPid, Ref, fun(Q) -> info(Q, Items) end, list(VHostPath),
+      continue),
+    rabbit_control_misc:emitting_map_with_exit_handler(
+      AggregatorPid, Ref, fun(Q) -> info_down(Q, Items) end,
+      list_down(VHostPath)).
+
 force_event_refresh(Ref) ->
     [gen_server2:cast(Q#amqqueue.pid,
                       {force_event_refresh, Ref}) || Q <- list()],
@@ -593,15 +613,24 @@ consumers(#amqqueue{ pid = QPid }) -> delegate:call(QPid, consumers).
 consumer_info_keys() -> ?CONSUMER_INFO_KEYS.
 
 consumers_all(VHostPath) ->
-    ConsumerInfoKeys=consumer_info_keys(),
+    ConsumerInfoKeys = consumer_info_keys(),
     lists:append(
       map(list(VHostPath),
-          fun (Q) ->
-              [lists:zip(
-                 ConsumerInfoKeys,
-                 [Q#amqqueue.name, ChPid, CTag, AckRequired, Prefetch, Args]) ||
-                  {ChPid, CTag, AckRequired, Prefetch, Args} <- consumers(Q)]
-          end)).
+          fun(Q) -> get_queue_consumer_info(Q, ConsumerInfoKeys) end)).
+
+consumers_all(VHostPath, Ref, AggregatorPid) ->
+    ConsumerInfoKeys = consumer_info_keys(),
+    rabbit_control_misc:emitting_map(
+      AggregatorPid, Ref,
+      fun(Q) -> get_queue_consumer_info(Q, ConsumerInfoKeys) end,
+      list(VHostPath)).
+
+get_queue_consumer_info(Q, ConsumerInfoKeys) ->
+    lists:flatten(
+      [lists:zip(ConsumerInfoKeys,
+                 [Q#amqqueue.name, ChPid, CTag,
+                  AckRequired, Prefetch, Args]) ||
+          {ChPid, CTag, AckRequired, Prefetch, Args} <- consumers(Q)]).
 
 stat(#amqqueue{pid = QPid}) -> delegate:call(QPid, stat).
 
@@ -782,14 +811,40 @@ on_node_up(Node) ->
            fun () ->
                    Qs = mnesia:match_object(rabbit_queue,
                                             #amqqueue{_ = '_'}, write),
-                   [case lists:member(Node, RSs) of
-                        true  -> RSs1 = RSs -- [Node],
-                                 store_queue(
-                                   Q#amqqueue{recoverable_slaves = RSs1});
-                        false -> ok
-                    end || #amqqueue{recoverable_slaves = RSs} = Q <- Qs],
+                   [maybe_clear_recoverable_node(Node, Q) || Q <- Qs],
                    ok
            end).
+
+maybe_clear_recoverable_node(Node,
+                             #amqqueue{sync_slave_pids    = SPids,
+                                       recoverable_slaves = RSs} = Q) ->
+    case lists:member(Node, RSs) of
+        true  ->
+            %% There is a race with
+            %% rabbit_mirror_queue_slave:record_synchronised/1 called
+            %% by the incoming slave node and this function, called
+            %% by the master node. If this function is executed after
+            %% record_synchronised/1, the node is erroneously removed
+            %% from the recoverable slaves list.
+            %%
+            %% We check if the slave node's queue PID is alive. If it is
+            %% the case, then this function is executed after. In this
+            %% situation, we don't touch the queue record, it is already
+            %% correct.
+            DoClearNode =
+                case [SP || SP <- SPids, node(SP) =:= Node] of
+                    [SPid] -> not rabbit_misc:is_process_alive(SPid);
+                    _      -> true
+                end,
+            if
+                DoClearNode -> RSs1 = RSs -- [Node],
+                               store_queue(
+                                 Q#amqqueue{recoverable_slaves = RSs1});
+                true        -> ok
+            end;
+        false ->
+            ok
+    end.
 
 on_node_down(Node) ->
     rabbit_misc:execute_mnesia_tx_with_tail(
@@ -847,6 +902,9 @@ deliver(Qs, Delivery = #delivery{flow = Flow}) ->
     %% the slave receives the message direct from the channel, and the
     %% other when it receives it via GM.
     case Flow of
+        %% Here we are tracking messages sent by the rabbit_channel
+        %% process. We are accessing the rabbit_channel process
+        %% dictionary.
         flow   -> [credit_flow:send(QPid) || QPid <- QPids],
                   [credit_flow:send(QPid) || QPid <- SPids];
         noflow -> ok

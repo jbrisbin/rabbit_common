@@ -576,10 +576,11 @@ init_it(Starter, Parent, Name0, Mod, Args, Options) ->
         {ok, State, Timeout, Backoff = {backoff, _, _, _}, Mod1} ->
             Backoff1 = extend_backoff(Backoff),
             proc_lib:init_ack(Starter, {ok, self()}),
-            loop(GS2State #gs2_state { mod           = Mod1,
-                                       state         = State,
-                                       time          = Timeout,
-                                       timeout_state = Backoff1 });
+            loop(find_prioritisers(
+                  GS2State #gs2_state { mod           = Mod1,
+                                        state         = State,
+                                        time          = Timeout,
+                                        timeout_state = Backoff1 }));
         {stop, Reason} ->
             %% For consistency, we must make sure that the
             %% registered name (if any) is unregistered before
@@ -623,7 +624,10 @@ unregister_name(_Name) -> ok.
 extend_backoff(undefined) ->
     undefined;
 extend_backoff({backoff, InitialTimeout, MinimumTimeout, DesiredHibPeriod}) ->
-    {backoff, InitialTimeout, MinimumTimeout, DesiredHibPeriod, now()}.
+    {backoff, InitialTimeout, MinimumTimeout, DesiredHibPeriod,
+      {erlang:phash2([node()]),
+       time_compat:monotonic_time(),
+       time_compat:unique_integer()}}.
 
 %%%========================================================================
 %%% Internal functions
@@ -632,8 +636,15 @@ extend_backoff({backoff, InitialTimeout, MinimumTimeout, DesiredHibPeriod}) ->
 %%% The MAIN loop.
 %%% ---------------------------------------------------
 loop(GS2State = #gs2_state { time          = hibernate,
-                             timeout_state = undefined }) ->
-    pre_hibernate(GS2State);
+                             timeout_state = undefined,
+                             queue         = Queue }) ->
+    case priority_queue:is_empty(Queue) of
+        true  ->
+            pre_hibernate(GS2State);
+        false ->
+            process_next_msg(GS2State)
+    end;
+
 loop(GS2State) ->
     process_next_msg(drain(GS2State)).
 
@@ -687,7 +698,9 @@ wake_hib(GS2State = #gs2_state { timeout_state = TS }) ->
                         undefined ->
                             undefined;
                         {SleptAt, TimeoutState} ->
-                            adjust_timeout_state(SleptAt, now(), TimeoutState)
+                            adjust_timeout_state(SleptAt,
+                                                 time_compat:monotonic_time(),
+                                                 TimeoutState)
                     end,
     post_hibernate(
       drain(GS2State #gs2_state { timeout_state = TimeoutState1 })).
@@ -695,7 +708,8 @@ wake_hib(GS2State = #gs2_state { timeout_state = TS }) ->
 hibernate(GS2State = #gs2_state { timeout_state = TimeoutState }) ->
     TS = case TimeoutState of
              undefined             -> undefined;
-             {backoff, _, _, _, _} -> {now(), TimeoutState}
+             {backoff, _, _, _, _} -> {time_compat:monotonic_time(),
+                                       TimeoutState}
          end,
     proc_lib:hibernate(?MODULE, wake_hib,
                        [GS2State #gs2_state { timeout_state = TS }]).
@@ -740,7 +754,8 @@ post_hibernate(GS2State = #gs2_state { state = State,
 
 adjust_timeout_state(SleptAt, AwokeAt, {backoff, CurrentTO, MinimumTO,
                                         DesiredHibPeriod, RandomState}) ->
-    NapLengthMicros = timer:now_diff(AwokeAt, SleptAt),
+    NapLengthMicros = time_compat:convert_time_unit(AwokeAt - SleptAt,
+                                                    native, micro_seconds),
     CurrentMicros = CurrentTO * 1000,
     MinimumMicros = MinimumTO * 1000,
     DesiredHibMicros = DesiredHibPeriod * 1000,

@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_networking).
@@ -21,7 +21,7 @@
          node_listeners/1, register_connection/1, unregister_connection/1,
          connections/0, connection_info_keys/0,
          connection_info/1, connection_info/2,
-         connection_info_all/0, connection_info_all/1,
+         connection_info_all/0, connection_info_all/1, connection_info_all/3,
          close_connection/2, force_connection_event_refresh/1, tcp_host/1]).
 
 %%used by TCP-based transports, e.g. STOMP adapter
@@ -82,6 +82,8 @@
 -spec(connection_info_all/0 :: () -> [rabbit_types:infos()]).
 -spec(connection_info_all/1 ::
         (rabbit_types:info_keys()) -> [rabbit_types:infos()]).
+-spec(connection_info_all/3 ::
+        (rabbit_types:info_keys(), reference(), pid()) -> 'ok').
 -spec(close_connection/2 :: (pid(), string()) -> 'ok').
 -spec(force_connection_event_refresh/1 :: (reference()) -> 'ok').
 
@@ -440,6 +442,11 @@ connection_info(Pid, Items) -> rabbit_reader:info(Pid, Items).
 connection_info_all() -> cmap(fun (Q) -> connection_info(Q) end).
 connection_info_all(Items) -> cmap(fun (Q) -> connection_info(Q, Items) end).
 
+connection_info_all(Items, Ref, AggregatorPid) ->
+    rabbit_control_misc:emitting_map_with_exit_handler(
+      AggregatorPid, Ref, fun(Q) -> connection_info(Q, Items) end,
+      connections()).
+
 close_connection(Pid, Explanation) ->
     rabbit_log:info("Closing connection ~p because ~p~n", [Pid, Explanation]),
     case lists:member(Pid, connections()) of
@@ -475,8 +482,22 @@ hostname() ->
 cmap(F) -> rabbit_misc:filter_exit_map(F, connections()).
 
 tcp_opts() ->
-    {ok, Opts} = application:get_env(rabbit, tcp_listen_options),
-    Opts.
+    {ok, ConfigOpts} = application:get_env(rabbit, tcp_listen_options),
+    merge_essential_tcp_listen_options(ConfigOpts).
+
+-define(ESSENTIAL_LISTEN_OPTIONS,
+        [binary,
+         {active, false},
+         {packet, raw},
+         {reuseaddr, true},
+         {nodelay, true}]).
+
+merge_essential_tcp_listen_options(Opts) ->
+    lists:foldl(fun ({K, _} = Opt, Acc) ->
+                        lists:keystore(K, 1, Acc, Opt);
+                    (Opt, Acc) ->
+                        [Opt | Acc]
+                end , Opts, ?ESSENTIAL_LISTEN_OPTIONS).
 
 %% inet_parse:address takes care of ip string, like "0.0.0.0"
 %% inet:getaddr returns immediately for ip tuple {0,0,0,0},
