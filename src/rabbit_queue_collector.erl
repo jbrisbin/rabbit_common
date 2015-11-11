@@ -11,10 +11,13 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_queue_collector).
+
+%% Queue collector keeps track of exclusive queues and cleans them
+%% up e.g. when their connection is closed.
 
 -behaviour(gen_server).
 

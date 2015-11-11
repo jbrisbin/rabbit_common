@@ -10,8 +10,8 @@
 %%
 %% The Original Code is RabbitMQ.
 %%
-%% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% The Initial Developer of the Original Code is Pivotal Software, Inc.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 %% Passed around most places
@@ -23,9 +23,15 @@
 -record(auth_user, {username,
                     tags,
                     impl}).
+%% Passed to authz backends.
+-record(authz_socket_info, {sockname, peername}).
 
 %% Implementation for the internal auth backend
--record(internal_user, {username, password_hash, tags}).
+-record(internal_user, {
+    username,
+    password_hash,
+    tags,
+    hashing_algorithm}).
 -record(permission, {configure, write, read}).
 -record(user_vhost, {username, virtual_host}).
 -record(user_permission, {user_vhost, permission}).
@@ -104,9 +110,10 @@
 
 %%----------------------------------------------------------------------------
 
--define(COPYRIGHT_MESSAGE, "Copyright (C) 2007-2014 GoPivotal, Inc.").
+-define(COPYRIGHT_MESSAGE, "Copyright (C) 2007-2015 Pivotal Software, Inc.").
 -define(INFORMATION_MESSAGE, "Licensed under the MPL.  See http://www.rabbitmq.com/").
--define(ERTS_MINIMUM, "5.6.3").
+-define(OTP_MINIMUM, "R16B03").
+-define(ERTS_MINIMUM, "5.10.4").
 
 %% EMPTY_FRAME_SIZE, 8 = 1 + 2 + 4 + 1
 %%  - 1 byte of frame type
@@ -122,6 +129,10 @@
 -define(HIBERNATE_AFTER_MIN,        1000).
 -define(DESIRED_HIBERNATE,         10000).
 -define(CREDIT_DISC_BOUND,   {2000, 500}).
+%% When we discover that we should write some indices to disk for some
+%% betas, the IO_BATCH_SIZE sets the number of betas that we must be
+%% due to write indices for before we do any work at all.
+-define(IO_BATCH_SIZE, 2048). %% next power-of-2 after ?CREDIT_DISC_BOUND
 
 -define(INVALID_HEADERS_KEY, <<"x-invalid-headers">>).
 -define(ROUTING_HEADERS, [<<"CC">>, <<"BCC">>]).

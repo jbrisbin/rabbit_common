@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_authz_backend).
@@ -29,13 +29,15 @@
 %%
 %% Possible responses:
 %% {ok, Impl}
-%%     User authorisation succeeded, and here's the impl field.
+%% {ok, Impl, Tags}
+%%     User authorisation succeeded, and here's the impl and potential extra tags fields.
 %% {error, Error}
 %%     Something went wrong. Log and die.
 %% {refused, Msg, Args}
 %%     User authorisation failed. Log and die.
 -callback user_login_authorization(rabbit_types:username()) ->
     {'ok', any()} |
+    {'ok', any(), any()} |
     {'refused', string(), [any()]} |
     {'error', any()}.
 

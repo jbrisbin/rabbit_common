@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_event).
@@ -37,8 +37,7 @@
 
 -type(event_type() :: atom()).
 -type(event_props() :: term()).
--type(event_timestamp() ::
-        {non_neg_integer(), non_neg_integer(), non_neg_integer()}).
+-type(event_timestamp() :: non_neg_integer()).
 
 -type(event() :: #event { type      :: event_type(),
                           props     :: event_props(),
@@ -160,5 +159,5 @@ event_cons(Type, Props, Ref) ->
     #event{type      = Type,
            props     = Props,
            reference = Ref,
-           timestamp = os:timestamp()}.
+           timestamp = time_compat:os_system_time(milli_seconds)}.
 

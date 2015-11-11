@@ -11,10 +11,42 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_channel).
+
+%% rabbit_channel processes represent an AMQP 0-9-1 channels.
+%%
+%% Connections parse protocol frames coming from clients and
+%% dispatch them to channel processes.
+%% Channels are responsible for implementing the logic behind
+%% the various protocol methods, involving other processes as
+%% needed:
+%%
+%%  * Routing messages (using functions in various exchange type
+%%    modules) to queue processes.
+%%  * Managing queues, exchanges, and bindings.
+%%  * Keeping track of consumers
+%%  * Keeping track of unacknowledged deliveries to consumers
+%%  * Keeping track of publisher confirms
+%%  * Keeping track of mandatory message routing confirmations
+%%    and returns
+%%  * Transaction management
+%%  * Authorisation (enforcing permissions)
+%%  * Publishing trace events if tracing is enabled
+%%
+%% Every channel has a number of dependent processes:
+%%
+%%  * A writer which is responsible for sending frames to clients.
+%%  * A limiter which controls how many messages can be delivered
+%%    to consumers according to active QoS prefetch and internal
+%%    flow control logic.
+%%
+%% Channels are also aware of their connection's queue collector.
+%% When a queue is declared as exclusive on a channel, the channel
+%% will notify queue collector of that queue.
+
 -include("rabbit_framing.hrl").
 -include("rabbit.hrl").
 
@@ -23,7 +55,8 @@
 -export([start_link/11, do/2, do/3, do_flow/3, flush/1, shutdown/1]).
 -export([send_command/2, deliver/4, deliver_reply/2,
          send_credit_reply/2, send_drained/2]).
--export([list/0, info_keys/0, info/1, info/2, info_all/0, info_all/1]).
+-export([list/0, info_keys/0, info/1, info/2, info_all/0, info_all/1,
+         info_all/3]).
 -export([refresh_config_local/0, ready_for_close/1]).
 -export([force_event_refresh/1]).
 
@@ -32,15 +65,87 @@
          prioritise_cast/3, prioritise_info/3, format_message_queue/2]).
 %% Internal
 -export([list_local/0, deliver_reply_local/3]).
+-export([get_vhost/1, get_user/1]).
 
--record(ch, {state, protocol, channel, reader_pid, writer_pid, conn_pid,
-             conn_name, limiter, tx, next_tag, unacked_message_q, user,
-             virtual_host, most_recently_declared_queue,
-             queue_names, queue_monitors, consumer_mapping,
-             queue_consumers, delivering_queues,
-             queue_collector_pid, stats_timer, confirm_enabled, publish_seqno,
-             unconfirmed, confirmed, mandatory, capabilities, trace_state,
-             consumer_prefetch, reply_consumer}).
+-record(ch, {
+  %% starting | running | flow | closing
+  state,
+  %% same as reader's protocol. Used when instantiating
+  %% (protocol) exceptions.
+  protocol,
+  %% channel number
+  channel,
+  %% reader process
+  reader_pid,
+  %% writer process
+  writer_pid,
+  %%
+  conn_pid,
+  %% same as reader's name, see #v1.name
+  %% in rabbit_reader
+  conn_name,
+  %% limiter pid, see rabbit_limiter
+  limiter,
+  %% none | {Msgs, Acks} | committing | failed |
+  tx,
+  %% (consumer) delivery tag sequence
+  next_tag,
+  %% messages pending consumer acknowledgement
+  unacked_message_q,
+  %% same as #v1.user in the reader, used in
+  %% authorisation checks
+  user,
+  %% same as #v1.user in the reader
+  virtual_host,
+  %% when queue.bind's queue field is empty,
+  %% this name will be used instead
+  most_recently_declared_queue,
+  %% a dictionary of queue pid to queue name
+  queue_names,
+  %% queue processes are monitored to update
+  %% queue names
+  queue_monitors,
+  %% a dictionary of consumer tags to
+  %% consumer details: #amqqueue record, acknowledgement mode,
+  %% consumer exclusivity, etc
+  consumer_mapping,
+  %% a dictionary of queue pids to consumer tag lists
+  queue_consumers,
+  %% a set of pids of queues that have unacknowledged
+  %% deliveries
+  delivering_queues,
+  %% when a queue is declared as exclusive, queue
+  %% collector must be notified.
+  %% see rabbit_queue_collector for more info.
+  queue_collector_pid,
+  %% timer used to emit statistics
+  stats_timer,
+  %% are publisher confirms enabled for this channel?
+  confirm_enabled,
+  %% publisher confirm delivery tag sequence
+  publish_seqno,
+  %% a dtree used to track unconfirmed
+  %% (to publishers) messages
+  unconfirmed,
+  %% a list of tags for published messages that were
+  %% delivered but are yet to be confirmed to the client
+  confirmed,
+  %% a dtree used to track oustanding notifications
+  %% for messages published as mandatory
+  mandatory,
+  %% same as capabilities in the reader
+  capabilities,
+  %% tracing exchange resource if tracing is enabled,
+  %% 'none' otherwise
+  trace_state,
+  consumer_prefetch,
+  %% used by "one shot RPC" (amq.
+  reply_consumer,
+  %% flow | noflow, see rabbitmq-server#114
+  delivery_flow,
+  interceptor_state
+}).
+
 
 -define(MAX_PERMISSION_CACHE_SIZE, 12).
 
@@ -81,6 +186,10 @@
 
 -type(channel_number() :: non_neg_integer()).
 
+-export_type([channel/0]).
+
+-type(channel() :: #ch{}).
+
 -spec(start_link/11 ::
         (channel_number(), pid(), pid(), pid(), string(),
          rabbit_types:protocol(), rabbit_types:user(), rabbit_types:vhost(),
@@ -110,6 +219,7 @@
 -spec(info/2 :: (pid(), rabbit_types:info_keys()) -> rabbit_types:infos()).
 -spec(info_all/0 :: () -> [rabbit_types:infos()]).
 -spec(info_all/1 :: (rabbit_types:info_keys()) -> [rabbit_types:infos()]).
+-spec(info_all/3 :: (rabbit_types:info_keys(), reference(), pid()) -> 'ok').
 -spec(refresh_config_local/0 :: () -> 'ok').
 -spec(ready_for_close/1 :: (pid()) -> 'ok').
 -spec(force_event_refresh/1 :: (reference()) -> 'ok').
@@ -131,6 +241,8 @@ do(Pid, Method, Content) ->
     gen_server2:cast(Pid, {method, Method, Content, noflow}).
 
 do_flow(Pid, Method, Content) ->
+    %% Here we are tracking messages sent by the rabbit_reader
+    %% process. We are accessing the rabbit_reader process dictionary.
     credit_flow:send(Pid),
     gen_server2:cast(Pid, {method, Method, Content, flow}).
 
@@ -215,6 +327,10 @@ info_all() ->
 info_all(Items) ->
     rabbit_misc:filter_exit_map(fun (C) -> info(C, Items) end, list()).
 
+info_all(Items, Ref, AggregatorPid) ->
+    rabbit_control_misc:emitting_map_with_exit_handler(
+      AggregatorPid, Ref, fun(C) -> info(C, Items) end, list()).
+
 refresh_config_local() ->
     rabbit_misc:upmap(
       fun (C) -> gen_server2:call(C, refresh_config, infinity) end,
@@ -235,6 +351,10 @@ init([Channel, ReaderPid, WriterPid, ConnPid, ConnName, Protocol, User, VHost,
     process_flag(trap_exit, true),
     ?store_proc_name({ConnName, Channel}),
     ok = pg_local:join(rabbit_channels, self()),
+    Flow = case rabbit_misc:get_env(rabbit, mirroring_flow_control, true) of
+             true   -> flow;
+             false  -> noflow
+           end,
     State = #ch{state                   = starting,
                 protocol                = Protocol,
                 channel                 = Channel,
@@ -263,12 +383,16 @@ init([Channel, ReaderPid, WriterPid, ConnPid, ConnName, Protocol, User, VHost,
                 capabilities            = Capabilities,
                 trace_state             = rabbit_trace:init(VHost),
                 consumer_prefetch       = 0,
-                reply_consumer          = none},
-    State1 = rabbit_event:init_stats_timer(State, #ch.stats_timer),
-    rabbit_event:notify(channel_created, infos(?CREATION_EVENT_KEYS, State1)),
-    rabbit_event:if_enabled(State1, #ch.stats_timer,
-                            fun() -> emit_stats(State1) end),
-    {ok, State1, hibernate,
+                reply_consumer          = none,
+                delivery_flow           = Flow,
+                interceptor_state       = undefined},
+    State1 = State#ch{
+               interceptor_state = rabbit_channel_interceptor:init(State)},
+    State2 = rabbit_event:init_stats_timer(State1, #ch.stats_timer),
+    rabbit_event:notify(channel_created, infos(?CREATION_EVENT_KEYS, State2)),
+    rabbit_event:if_enabled(State2, #ch.stats_timer,
+                            fun() -> emit_stats(State2) end),
+    {ok, State2, hibernate,
      {backoff, ?HIBERNATE_AFTER_MIN, ?HIBERNATE_AFTER_MIN, ?DESIRED_HIBERNATE}}.
 
 prioritise_call(Msg, _From, _Len, _State) ->
@@ -317,15 +441,19 @@ handle_call(_Request, _From, State) ->
     noreply(State).
 
 handle_cast({method, Method, Content, Flow},
-            State = #ch{reader_pid   = Reader,
-                        virtual_host = VHost}) ->
+            State = #ch{reader_pid        = Reader,
+                        interceptor_state = IState}) ->
     case Flow of
+        %% We are going to process a message from the rabbit_reader
+        %% process, so here we ack it. In this case we are accessing
+        %% the rabbit_channel process dictionary.
         flow   -> credit_flow:ack(Reader);
         noflow -> ok
     end,
-    try handle_method(rabbit_channel_interceptor:intercept_method(
-                        expand_shortcuts(Method, State), VHost),
-                      Content, State) of
+
+    try handle_method(rabbit_channel_interceptor:intercept_in(
+                        expand_shortcuts(Method, State), Content, IState),
+                      State) of
         {reply, Reply, NewState} ->
             ok = send(Reply, NewState),
             noreply(NewState);
@@ -428,6 +556,12 @@ handle_cast({confirm, MsgSeqNos, QPid}, State = #ch{unconfirmed = UC}) ->
     noreply_coalesce(record_confirms(MXs, State#ch{unconfirmed = UC1})).
 
 handle_info({bump_credit, Msg}, State) ->
+    %% A rabbit_amqqueue_process is granting credit to our channel. If
+    %% our channel was being blocked by this process, and no other
+    %% process is blocking our channel, then this channel will be
+    %% unblocked. This means that any credit that was deferred will be
+    %% sent to rabbit_reader processs that might be blocked by this
+    %% particular channel.
     credit_flow:handle_bump_msg(Msg),
     noreply(State);
 
@@ -445,6 +579,11 @@ handle_info({'DOWN', _MRef, process, QPid, Reason}, State) ->
     State1 = handle_publishing_queue_down(QPid, Reason, State),
     State3 = handle_consuming_queue_down(QPid, State1),
     State4 = handle_delivering_queue_down(QPid, State3),
+    %% A rabbit_amqqueue_process has died. If our channel was being
+    %% blocked by this process, and no other process is blocking our
+    %% channel, then this channel will be unblocked. This means that
+    %% any credit that was deferred will be sent to the rabbit_reader
+    %% processs that might be blocked by this particular channel.
     credit_flow:peer_down(QPid),
     #ch{queue_names = QNames, queue_monitors = QMons} = State4,
     case dict:find(QPid, QNames) of
@@ -461,7 +600,10 @@ handle_pre_hibernate(State) ->
     ok = clear_permission_cache(),
     rabbit_event:if_enabled(
       State, #ch.stats_timer,
-      fun () -> emit_stats(State, [{idle_since, now()}]) end),
+      fun () -> emit_stats(State,
+                           [{idle_since,
+                             time_compat:os_system_time(milli_seconds)}])
+                end),
     {hibernate, rabbit_event:stop_stats_timer(State, #ch.stats_timer)}.
 
 terminate(Reason, State) ->
@@ -483,6 +625,8 @@ code_change(_OldVsn, State, _Extra) ->
 format_message_queue(Opt, MQ) -> rabbit_misc:format_message_queue(Opt, MQ).
 
 %%---------------------------------------------------------------------------
+
+log(Level, Fmt, Args) -> rabbit_log:log(channel, Level, Fmt, Args).
 
 reply(Reply, NewState) -> {reply, Reply, next_state(NewState), hibernate}.
 
@@ -520,10 +664,10 @@ handle_exception(Reason, State = #ch{protocol     = Protocol,
     {_Result, State1} = notify_queues(State),
     case rabbit_binary_generator:map_exception(Channel, Reason, Protocol) of
         {Channel, CloseMethod} ->
-            rabbit_log:error("Channel error on connection ~p (~s, vhost: '~s',"
-                             " user: '~s'), channel ~p:~n~p~n",
-                             [ConnPid, ConnName, VHost, User#user.username,
-                              Channel, Reason]),
+            log(error, "Channel error on connection ~p (~s, vhost: '~s',"
+                       " user: '~s'), channel ~p:~n~p~n",
+                       [ConnPid, ConnName, VHost, User#user.username,
+                        Channel, Reason]),
             ok = rabbit_writer:send_command(WriterPid, CloseMethod),
             {noreply, State1};
         {0, _} ->
@@ -705,6 +849,9 @@ record_confirms([], State) ->
 record_confirms(MXs, State = #ch{confirmed = C}) ->
     State#ch{confirmed = [MXs | C]}.
 
+handle_method({Method, Content}, State) ->
+    handle_method(Method, Content, State).
+
 handle_method(#'channel.open'{}, _, State = #ch{state = starting}) ->
     %% Don't leave "starting" as the state for 5s. TODO is this TRTTD?
     State1 = State#ch{state = running},
@@ -714,7 +861,7 @@ handle_method(#'channel.open'{}, _, State = #ch{state = starting}) ->
 
 handle_method(#'channel.open'{}, _, _State) ->
     rabbit_misc:protocol_error(
-      command_invalid, "second 'channel.open' seen", []);
+      channel_error, "second 'channel.open' seen", []);
 
 handle_method(_Method, _, #ch{state = starting}) ->
     rabbit_misc:protocol_error(channel_error, "expected 'channel.open'", []);
@@ -768,7 +915,8 @@ handle_method(#'basic.publish'{exchange    = ExchangeNameBin,
                                    confirm_enabled = ConfirmEnabled,
                                    trace_state     = TraceState,
                                    user            = #user{username = Username},
-                                   conn_name       = ConnName}) ->
+                                   conn_name       = ConnName,
+                                   delivery_flow   = Flow}) ->
     check_msg_size(Content),
     ExchangeName = rabbit_misc:r(VHostPath, exchange, ExchangeNameBin),
     check_write_permitted(ExchangeName, State),
@@ -795,7 +943,7 @@ handle_method(#'basic.publish'{exchange    = ExchangeNameBin,
             QNames = rabbit_exchange:route(Exchange, Delivery),
             rabbit_trace:tap_in(Message, QNames, ConnName, ChannelNum,
                                 Username, TraceState),
-            DQ = {Delivery#delivery{flow = flow}, QNames},
+            DQ = {Delivery#delivery{flow = Flow}, QNames},
             {noreply, case Tx of
                           none         -> deliver_to_queues(DQ, State1);
                           {Msgs, Acks} -> Msgs1 = queue:in(DQ, Msgs),
@@ -1821,7 +1969,7 @@ i(messages_uncommitted,    #ch{tx = {Msgs, _Acks}})       -> queue:len(Msgs);
 i(messages_uncommitted,    #ch{})                         -> 0;
 i(acks_uncommitted,        #ch{tx = {_Msgs, Acks}})       -> ack_len(Acks);
 i(acks_uncommitted,        #ch{})                         -> 0;
-i(state,                   #ch{state = running})         -> credit_flow:state();
+i(state,                   #ch{state = running})          -> credit_flow:state();
 i(state,                   #ch{state = State})            -> State;
 i(prefetch_count,          #ch{consumer_prefetch = C})    -> C;
 i(global_prefetch_count, #ch{limiter = Limiter}) ->
@@ -1869,3 +2017,7 @@ erase_queue_stats(QName) ->
     [erase({queue_exchange_stats, QX}) ||
         {{queue_exchange_stats, QX = {QName0, _}}, _} <- get(),
         QName0 =:= QName].
+
+get_vhost(#ch{virtual_host = VHost}) -> VHost.
+
+get_user(#ch{user = User}) -> User.

@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_basic).
@@ -20,8 +20,8 @@
 
 -export([publish/4, publish/5, publish/1,
          message/3, message/4, properties/1, prepend_table_header/3,
-         extract_headers/1, map_headers/2, delivery/4, header_routes/1,
-         parse_expiration/1]).
+         extract_headers/1, extract_timestamp/1, map_headers/2, delivery/4,
+         header_routes/1, parse_expiration/1, header/2, header/3]).
 -export([build_content/2, from_content/1, msg_size/1, maybe_gc_large_msg/1]).
 
 %%----------------------------------------------------------------------------
@@ -32,6 +32,7 @@
         (rabbit_framing:amqp_property_record() | [{atom(), any()}])).
 -type(publish_result() ::
         ({ok, [pid()]} | rabbit_types:error('not_found'))).
+-type(header() :: any()).
 -type(headers() :: rabbit_framing:amqp_table() | 'undefined').
 
 -type(exchange_input() :: (rabbit_types:exchange() | rabbit_exchange:name())).
@@ -60,6 +61,11 @@
 
 -spec(prepend_table_header/3 ::
         (binary(), rabbit_framing:amqp_table(), headers()) -> headers()).
+
+-spec(header/2 ::
+        (header(), headers()) -> 'undefined' | any()).
+-spec(header/3 ::
+        (header(), headers(), any()) -> 'undefined' | any()).
 
 -spec(extract_headers/1 :: (rabbit_types:content()) -> headers()).
 
@@ -225,10 +231,28 @@ update_invalid(Name, Value, ExistingHdr, Header) ->
     NewHdr = rabbit_misc:set_table_value(ExistingHdr, Name, array, Values),
     set_invalid(NewHdr, Header).
 
+header(_Header, undefined) ->
+    undefined;
+header(_Header, []) ->
+    undefined;
+header(Header, Headers) ->
+    header(Header, Headers, undefined).
+
+header(Header, Headers, Default) ->
+    case lists:keysearch(Header, 1, Headers) of
+        false        -> Default;
+        {value, Val} -> Val
+    end.
+
 extract_headers(Content) ->
     #content{properties = #'P_basic'{headers = Headers}} =
         rabbit_binary_parser:ensure_content_decoded(Content),
     Headers.
+
+extract_timestamp(Content) ->
+    #content{properties = #'P_basic'{timestamp = Timestamp}} =
+        rabbit_binary_parser:ensure_content_decoded(Content),
+    Timestamp.
 
 map_headers(F, Content) ->
     Content1 = rabbit_binary_parser:ensure_content_decoded(Content),

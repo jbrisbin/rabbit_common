@@ -11,14 +11,15 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_nodes).
 
 -export([names/1, diagnostics/1, make/1, parts/1, cookie_hash/0,
          is_running/2, is_process_running/2,
-         cluster_name/0, set_cluster_name/1, ensure_epmd/0]).
+         cluster_name/0, set_cluster_name/1, ensure_epmd/0,
+         all_running/0]).
 
 -include_lib("kernel/include/inet.hrl").
 
@@ -42,6 +43,7 @@
 -spec(cluster_name/0 :: () -> binary()).
 -spec(set_cluster_name/1 :: (binary()) -> 'ok').
 -spec(ensure_epmd/0 :: () -> 'ok').
+-spec(all_running/0 :: () -> [node()]).
 
 -endif.
 
@@ -137,7 +139,8 @@ dist_broken_diagnostics(Name, Host, NamePorts) ->
                      [{"  * TCP connection succeeded but Erlang distribution "
                        "failed~n"
                        "  * suggestion: hostname mismatch?~n"
-                       "  * suggestion: is the cookie set correctly?", []}];
+                       "  * suggestion: is the cookie set correctly?~n"
+                       "  * suggestion: is the Erlang distribution using TLS?", []}];
                  {error, Reason} ->
                      [{"  * can't establish TCP connection, reason: ~s~n"
                        "  * suggestion: blocked by firewall?",
@@ -199,9 +202,19 @@ cluster_name_default() ->
 set_cluster_name(Name) ->
     rabbit_runtime_parameters:set_global(cluster_name, Name).
 
+random(N) ->
+    case get(random_seed) of
+        undefined ->
+            random:seed(erlang:phash2([node()]),
+                        time_compat:monotonic_time(),
+                        time_compat:unique_integer());
+        _ -> ok
+    end,
+    random:uniform(N).
+
 ensure_epmd() ->
     {ok, Prog} = init:get_argument(progname),
-    ID = random:uniform(1000000000),
+    ID = random(1000000000),
     Port = open_port(
              {spawn_executable, os:find_executable(Prog)},
              [{args, ["-sname", rabbit_misc:format("epmd-starter-~b", [ID]),
@@ -214,3 +227,5 @@ port_shutdown_loop(Port) ->
         {Port, {exit_status, _Rc}} -> ok;
         {Port, _}                  -> port_shutdown_loop(Port)
     end.
+
+all_running() -> rabbit_mnesia:cluster_nodes(running).
