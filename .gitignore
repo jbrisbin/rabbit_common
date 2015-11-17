@@ -1,5 +1,7 @@
 .DS_Store
-ebin
-deps
-.rebar
+ebin/
+deps/
+.rebar/
 *.txt
+.idea/
+*.iml

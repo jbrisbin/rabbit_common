@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_misc).
@@ -44,32 +44,33 @@
 -export([format/2, format_many/1, format_stderr/2]).
 -export([unfold/2, ceil/1, queue_fold/3]).
 -export([sort_field_table/1]).
--export([pid_to_string/1, string_to_pid/1, node_to_fake_pid/1]).
+-export([pid_to_string/1, string_to_pid/1,
+         pid_change_node/2, node_to_fake_pid/1]).
 -export([version_compare/2, version_compare/3]).
 -export([version_minor_equivalent/2]).
 -export([dict_cons/3, orddict_cons/3, gb_trees_cons/3]).
 -export([gb_trees_fold/3, gb_trees_foreach/2]).
 -export([all_module_attributes/1, build_acyclic_graph/3]).
--export([now_ms/0]).
 -export([const/1]).
 -export([ntoa/1, ntoab/1]).
 -export([is_process_alive/1]).
--export([pget/2, pget/3, pget_or_die/2, pset/3]).
+-export([pget/2, pget/3, pget_or_die/2, pmerge/3, pset/3, plmerge/2]).
 -export([format_message_queue/2]).
 -export([append_rpc_all_nodes/4]).
 -export([os_cmd/1]).
+-export([is_os_process_alive/1]).
 -export([gb_sets_difference/2]).
 -export([version/0, otp_release/0, which_applications/0]).
 -export([sequence_error/1]).
 -export([json_encode/1, json_decode/1, json_to_term/1, term_to_json/1]).
 -export([check_expiry/1]).
 -export([base64url/1]).
--export([interval_operation/4]).
+-export([interval_operation/5]).
 -export([ensure_timer/4, stop_timer/2, send_after/3, cancel_timer/1]).
 -export([get_parent/0]).
 -export([store_proc_name/1, store_proc_name/2]).
 -export([moving_average/4]).
--export([now_to_ms/1]).
+-export([get_env/3]).
 
 %% Horrible macro to use in guards
 -define(IS_BENIGN_EXIT(R),
@@ -196,6 +197,7 @@
         (rabbit_framing:amqp_table()) -> rabbit_framing:amqp_table()).
 -spec(pid_to_string/1 :: (pid()) -> string()).
 -spec(string_to_pid/1 :: (string()) -> pid()).
+-spec(pid_change_node/2 :: (pid(), node()) -> pid()).
 -spec(node_to_fake_pid/1 :: (atom()) -> pid()).
 -spec(version_compare/2 :: (string(), string()) -> 'lt' | 'eq' | 'gt').
 -spec(version_compare/3 ::
@@ -213,12 +215,11 @@
         (atom()) -> [{atom(), atom(), [term()]}]).
 -spec(build_acyclic_graph/3 ::
         (graph_vertex_fun(), graph_edge_fun(), [{atom(), [term()]}])
-        -> rabbit_types:ok_or_error2(digraph:digraph(),
+        -> rabbit_types:ok_or_error2(digraph:graph(),
                                      {'vertex', 'duplicate', digraph:vertex()} |
                                      {'edge', ({bad_vertex, digraph:vertex()} |
                                                {bad_edge, [digraph:vertex()]}),
                                       digraph:vertex(), digraph:vertex()})).
--spec(now_ms/0 :: () -> non_neg_integer()).
 -spec(const/1 :: (A) -> thunk(A)).
 -spec(ntoa/1 :: (inet:ip_address()) -> string()).
 -spec(ntoab/1 :: (inet:ip_address()) -> string()).
@@ -226,10 +227,13 @@
 -spec(pget/2 :: (term(), [term()]) -> term()).
 -spec(pget/3 :: (term(), [term()], term()) -> term()).
 -spec(pget_or_die/2 :: (term(), [term()]) -> term() | no_return()).
--spec(pset/3 :: (term(), term(), [term()]) -> term()).
+-spec(pmerge/3 :: (term(), term(), [term()]) -> [term()]).
+-spec(plmerge/2 :: ([term()], [term()]) -> [term()]).
+-spec(pset/3 :: (term(), term(), [term()]) -> [term()]).
 -spec(format_message_queue/2 :: (any(), priority_queue:q()) -> term()).
 -spec(append_rpc_all_nodes/4 :: ([node()], atom(), atom(), [any()]) -> [any()]).
 -spec(os_cmd/1 :: (string()) -> string()).
+-spec(is_os_process_alive/1 :: (non_neg_integer()) -> boolean()).
 -spec(gb_sets_difference/2 :: (gb_sets:set(), gb_sets:set()) -> gb_sets:set()).
 -spec(version/0 :: () -> string()).
 -spec(otp_release/0 :: () -> string()).
@@ -242,8 +246,8 @@
 -spec(term_to_json/1 :: (any()) -> any()).
 -spec(check_expiry/1 :: (integer()) -> rabbit_types:ok_or_error(any())).
 -spec(base64url/1 :: (binary()) -> string()).
--spec(interval_operation/4 ::
-        ({atom(), atom(), any()}, float(), non_neg_integer(), non_neg_integer())
+-spec(interval_operation/5 ::
+        ({atom(), atom(), any()}, float(), non_neg_integer(), non_neg_integer(), non_neg_integer())
         -> {any(), non_neg_integer()}).
 -spec(ensure_timer/4 :: (A, non_neg_integer(), non_neg_integer(), any()) -> A).
 -spec(stop_timer/2 :: (A, non_neg_integer()) -> A).
@@ -254,9 +258,7 @@
 -spec(store_proc_name/1 :: (rabbit_types:proc_type_and_name()) -> ok).
 -spec(moving_average/4 :: (float(), float(), float(), float() | 'undefined')
                           -> float()).
--spec(now_to_ms/1 :: ({non_neg_integer(),
-                       non_neg_integer(),
-                       non_neg_integer()}) -> pos_integer()).
+-spec(get_env/3 :: (atom(), atom(), term())  -> term()).
 -endif.
 
 %%----------------------------------------------------------------------------
@@ -330,8 +332,8 @@ assert_args_equivalence1(Orig, New, Name, Key) ->
                  true  -> ok;
                  false -> assert_field_equivalence(OrigVal, NewVal, Name, Key)
             end;
-        {_, _} ->
-            assert_field_equivalence(Orig, New, Name, Key)
+        {OrigTypeVal, NewTypeVal} ->
+            assert_field_equivalence(OrigTypeVal, NewTypeVal, Name, Key)
     end.
 
 assert_field_equivalence(_Orig, _Orig, _Name, _Key) ->
@@ -349,13 +351,13 @@ val(undefined) ->
 val({Type, Value}) ->
     ValFmt = case is_binary(Value) of
                  true  -> "~s";
-                 false -> "~w"
+                 false -> "~p"
              end,
     format("the value '" ++ ValFmt ++ "' of type '~s'", [Value, Type]);
 val(Value) ->
     format(case is_binary(Value) of
                true  -> "'~s'";
-               false -> "'~w'"
+               false -> "'~p'"
            end, [Value]).
 
 %% Normally we'd call mnesia:dirty_read/1 here, but that is quite
@@ -520,8 +522,12 @@ execute_mnesia_transaction(TxFun) ->
                                 Res = mnesia:sync_transaction(TxFun),
                                 DiskLogAfter  = mnesia_dumper:get_log_writes(),
                                 case DiskLogAfter == DiskLogBefore of
-                                    true  -> Res;
-                                    false -> {sync, Res}
+                                    true  -> file_handle_cache_stats:update(
+                                              mnesia_ram_tx),
+                                             Res;
+                                    false -> file_handle_cache_stats:update(
+                                              mnesia_disk_tx),
+                                             {sync, Res}
                                 end;
                        true  -> mnesia:sync_transaction(TxFun)
                    end
@@ -686,11 +692,7 @@ sort_field_table(Arguments) ->
 %% regardless of what node we are running on. The representation also
 %% permits easy identification of the pid's node.
 pid_to_string(Pid) when is_pid(Pid) ->
-    %% see http://erlang.org/doc/apps/erts/erl_ext_dist.html (8.10 and
-    %% 8.7)
-    <<131,103,100,NodeLen:16,NodeBin:NodeLen/binary,Id:32,Ser:32,Cre:8>>
-        = term_to_binary(Pid),
-    Node = binary_to_term(<<131,100,NodeLen:16,NodeBin:NodeLen/binary>>),
+    {Node, Cre, Id, Ser} = decompose_pid(Pid),
     format("<~s.~B.~B.~B>", [Node, Cre, Id, Ser]).
 
 %% inverse of above
@@ -701,17 +703,32 @@ string_to_pid(Str) ->
     case re:run(Str, "^<(.*)\\.(\\d+)\\.(\\d+)\\.(\\d+)>\$",
                 [{capture,all_but_first,list}]) of
         {match, [NodeStr, CreStr, IdStr, SerStr]} ->
-            <<131,NodeEnc/binary>> = term_to_binary(list_to_atom(NodeStr)),
             [Cre, Id, Ser] = lists:map(fun list_to_integer/1,
                                        [CreStr, IdStr, SerStr]),
-            binary_to_term(<<131,103,NodeEnc/binary,Id:32,Ser:32,Cre:8>>);
+            compose_pid(list_to_atom(NodeStr), Cre, Id, Ser);
         nomatch ->
             throw(Err)
     end.
 
+pid_change_node(Pid, NewNode) ->
+    {_OldNode, Cre, Id, Ser} = decompose_pid(Pid),
+    compose_pid(NewNode, Cre, Id, Ser).
+
 %% node(node_to_fake_pid(Node)) =:= Node.
 node_to_fake_pid(Node) ->
-    string_to_pid(format("<~s.0.0.0>", [Node])).
+    compose_pid(Node, 0, 0, 0).
+
+decompose_pid(Pid) when is_pid(Pid) ->
+    %% see http://erlang.org/doc/apps/erts/erl_ext_dist.html (8.10 and
+    %% 8.7)
+    <<131,103,100,NodeLen:16,NodeBin:NodeLen/binary,Id:32,Ser:32,Cre:8>>
+        = term_to_binary(Pid),
+    Node = binary_to_term(<<131,100,NodeLen:16,NodeBin:NodeLen/binary>>),
+    {Node, Cre, Id, Ser}.
+
+compose_pid(Node, Cre, Id, Ser) ->
+    <<131,NodeEnc/binary>> = term_to_binary(Node),
+    binary_to_term(<<131,103,NodeEnc/binary,Id:32,Ser:32,Cre:8>>).
 
 version_compare(A, B, lte) ->
     case version_compare(A, B) of
@@ -782,9 +799,6 @@ gb_trees_fold1(Fun, Acc, {Key, Val, It}) ->
 
 gb_trees_foreach(Fun, Tree) ->
     gb_trees_fold(fun (Key, Val, Acc) -> Fun(Key, Val), Acc end, ok, Tree).
-
-now_ms() ->
-    timer:now_diff(now(), {0,0,0}) div 1000.
 
 module_attributes(Module) ->
     case catch Module:module_info(attributes) of
@@ -870,6 +884,21 @@ pget_or_die(K, P) ->
         V         -> V
     end.
 
+%% property merge 
+pmerge(Key, Val, List) ->
+      case proplists:is_defined(Key, List) of
+              true -> List;
+              _    -> [{Key, Val} | List]
+      end.
+
+%% proplists merge
+plmerge(P1, P2) ->
+    dict:to_list(dict:merge(fun(_, V, _) ->
+                                V 
+                            end, 
+                            dict:from_list(P1), 
+                            dict:from_list(P2))).
+
 pset(Key, Value, List) -> [{Key, Value} | proplists:delete(Key, List)].
 
 format_message_queue(_Opt, MQ) ->
@@ -913,6 +942,38 @@ os_cmd(Command) ->
                 false -> throw({command_not_found, Exec});
                 _     -> os:cmd(Command)
             end
+    end.
+
+is_os_process_alive(Pid) ->
+    with_os([{unix, fun () ->
+                            run_ps(Pid) =:= 0
+                    end},
+             {win32, fun () ->
+                             Cmd = "tasklist /nh /fi \"pid eq " ++ Pid ++ "\" ",
+                             Res = os_cmd(Cmd ++ "2>&1"),
+                             case re:run(Res, "erl\\.exe", [{capture, none}]) of
+                                 match -> true;
+                                 _     -> false
+                             end
+                     end}]).
+
+with_os(Handlers) ->
+    {OsFamily, _} = os:type(),
+    case proplists:get_value(OsFamily, Handlers) of
+        undefined -> throw({unsupported_os, OsFamily});
+        Handler   -> Handler()
+    end.
+
+run_ps(Pid) ->
+    Port = erlang:open_port({spawn, "ps -p " ++ Pid},
+                            [exit_status, {line, 16384},
+                             use_stdio, stderr_to_stdout]),
+    exit_loop(Port).
+
+exit_loop(Port) ->
+    receive
+        {Port, {exit_status, Rc}} -> Rc;
+        {Port, _}                 -> exit_loop(Port)
     end.
 
 gb_sets_difference(S1, S2) ->
@@ -985,9 +1046,6 @@ term_to_json(V) when is_binary(V) orelse is_number(V) orelse V =:= null orelse
                      V =:= true orelse V =:= false ->
     V.
 
-now_to_ms({Mega, Sec, Micro}) ->
-    (Mega * 1000000 * 1000000 + Sec * 1000000 + Micro) div 1000.
-
 check_expiry(N) when N < 0                 -> {error, {value_negative, N}};
 check_expiry(_N)                           -> ok.
 
@@ -1002,12 +1060,13 @@ base64url(In) ->
 %% want it to take more than MaxRatio of IdealInterval. So if it takes
 %% more then you want to run it less often. So we time how long it
 %% takes to run, and then suggest how long you should wait before
-%% running it again. Times are in millis.
-interval_operation({M, F, A}, MaxRatio, IdealInterval, LastInterval) ->
+%% running it again with a user specified max interval. Times are in millis.
+interval_operation({M, F, A}, MaxRatio, MaxInterval, IdealInterval, LastInterval) ->
     {Micros, Res} = timer:tc(M, F, A),
     {Res, case {Micros > 1000 * (MaxRatio * IdealInterval),
                 Micros > 1000 * (MaxRatio * LastInterval)} of
-              {true,  true}  -> round(LastInterval * 1.5);
+              {true,  true}  -> lists:min([MaxInterval,
+                                           round(LastInterval * 1.5)]);
               {true,  false} -> LastInterval;
               {false, false} -> lists:max([IdealInterval,
                                            round(LastInterval / 1.5)])
@@ -1044,6 +1103,13 @@ cancel_timer({timer, Ref})  -> {ok, cancel} = timer:cancel(Ref),
 
 store_proc_name(Type, ProcName) -> store_proc_name({Type, ProcName}).
 store_proc_name(TypeProcName)   -> put(process_name, TypeProcName).
+
+%% application:get_env/3 is only available in R16B01 or later.
+get_env(Application, Key, Def) ->
+    case application:get_env(Application, Key) of
+        {ok, Val} -> Val;
+        undefined -> Def
+    end.
 
 moving_average(_Time, _HalfLife, Next, undefined) ->
     Next;

@@ -11,18 +11,23 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
+
+-module(rabbit_queue_master_locator).
 
 -ifdef(use_specs).
 
--type(callback_result() :: 'ok' | {'stop', any()} | {'become', atom(), args()}).
--type(args() :: any()).
--type(members() :: [pid()]).
+-callback description()                -> [proplists:property()].
+-callback queue_master_location(pid()) -> {'ok', node()} | {'error', term()}.
 
--spec(joined/2           :: (args(), members())    -> callback_result()).
--spec(members_changed/3  :: (args(), members(),members()) -> callback_result()).
--spec(handle_msg/3       :: (args(), pid(), any()) -> callback_result()).
--spec(handle_terminate/2 :: (args(), term())       -> any()).
+-else.
+
+-export([behaviour_info/1]).
+behaviour_info(callbacks) ->
+    [{description,           0},
+     {queue_master_location, 1}];
+behaviour_info(_Other) ->
+    undefined.
 
 -endif.

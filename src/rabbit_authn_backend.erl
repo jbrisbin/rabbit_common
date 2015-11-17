@@ -14,28 +14,35 @@
 %% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
--module(rabbit_runtime_parameter).
+-module(rabbit_authn_backend).
+
+-include("rabbit.hrl").
 
 -ifdef(use_specs).
 
--type(validate_results() ::
-        'ok' | {error, string(), [term()]} | [validate_results()]).
-
--callback validate(rabbit_types:vhost(), binary(), binary(),
-                   term(), rabbit_types:user()) -> validate_results().
--callback notify(rabbit_types:vhost(), binary(), binary(), term()) -> 'ok'.
--callback notify_clear(rabbit_types:vhost(), binary(), binary()) -> 'ok'.
+%% Check a user can log in, given a username and a proplist of
+%% authentication information (e.g. [{password, Password}]). If your
+%% backend is not to be used for authentication, this should always
+%% refuse access.
+%%
+%% Possible responses:
+%% {ok, User}
+%%     Authentication succeeded, and here's the user record.
+%% {error, Error}
+%%     Something went wrong. Log and die.
+%% {refused, Msg, Args}
+%%     Client failed authentication. Log and die.
+-callback user_login_authentication(rabbit_types:username(), [term()]) ->
+    {'ok', rabbit_types:auth_user()} |
+    {'refused', string(), [any()]} |
+    {'error', any()}.
 
 -else.
 
 -export([behaviour_info/1]).
 
 behaviour_info(callbacks) ->
-    [
-     {validate, 5},
-     {notify, 4},
-     {notify_clear, 3}
-    ];
+    [{user_login_authentication, 2}];
 behaviour_info(_Other) ->
     undefined.
 

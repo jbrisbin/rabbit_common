@@ -11,10 +11,23 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2011-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2011-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(pmon).
+
+%% Process Monitor
+%% ================
+%%
+%% This module monitors processes so that every process has at most
+%% 1 monitor.
+%% Processes monitored can be dynamically added and removed.
+%%
+%% Unlike erlang:[de]monitor* functions, this module
+%% provides basic querying capability and avoids contacting down nodes.
+%%
+%% It is used to monitor nodes, queue mirrors, and by
+%% the queue collector, among other things.
 
 -export([new/0, new/1, monitor/2, monitor_all/2, demonitor/2,
          is_monitored/2, erase/2, monitored/1, is_empty/1]).

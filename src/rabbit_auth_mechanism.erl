@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2014 GoPivotal, Inc.  All rights reserved.
+%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_auth_mechanism).
@@ -36,13 +36,13 @@
 %%     Another round is needed. Here's the state I want next time.
 %% {protocol_error, Msg, Args}
 %%     Client got the protocol wrong. Log and die.
-%% {refused, Msg, Args}
+%% {refused, Username, Msg, Args}
 %%     Client failed authentication. Log and die.
 -callback handle_response(binary(), any()) ->
     {'ok', rabbit_types:user()} |
     {'challenge', binary(), any()} |
     {'protocol_error', string(), [any()]} |
-    {'refused', string(), [any()]}.
+    {'refused', rabbit_types:username() | none, string(), [any()]}.
 
 -else.
 
