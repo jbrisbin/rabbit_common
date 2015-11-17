@@ -6,7 +6,7 @@ This is a fork of the rabbit_common dependency, which is needed by the
 It's meant to be included in your rebar projects in your rebar.config file:
 
     {deps, [
-      {rabbit_common, ".*", {git, "git://github.com/jbrisbin/rabbit_common.git", "rabbitmq-3.5.6"}}
+      {rabbit_common, ".*", {git, "git://github.com/jbrisbin/rabbit_common.git", "rabbitmq-3.5.6-community"}}
     ]}.
 
 The "master" branch of this port is a simple re-packaging of the rabbit_common AMQP client dependency.
