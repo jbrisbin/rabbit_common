@@ -148,7 +148,8 @@
                 delegate,
                 group,
                 tx_fun,
-                initial_childspecs}).
+                initial_childspecs,
+                child_order}).
 
 %%----------------------------------------------------------------------------
 
@@ -288,7 +289,8 @@ start_internal(Group, TxFun, ChildSpecs) ->
 init({Group, TxFun, ChildSpecs}) ->
     {ok, #state{group              = Group,
                 tx_fun             = TxFun,
-                initial_childspecs = ChildSpecs}}.
+                initial_childspecs = ChildSpecs,
+                child_order = child_order_from(ChildSpecs)}}.
 
 handle_call({init, Overall}, _From,
             State = #state{overall            = undefined,
@@ -347,7 +349,7 @@ handle_cast({ensure_monitoring, Pid}, State) ->
     {noreply, State};
 
 handle_cast({die, Reason}, State = #state{group = Group}) ->
-    tell_all_peers_to_die(Group, Reason),
+    _ = tell_all_peers_to_die(Group, Reason),
     {stop, Reason, State};
 
 handle_cast(Msg, State) ->
@@ -364,20 +366,23 @@ handle_info({'DOWN', _Ref, process, Pid, Reason},
     %%
     %% Therefore if we get here we know we need to cause the entire
     %% mirrored sup to shut down, not just fail over.
-    tell_all_peers_to_die(Group, Reason),
+    _ = tell_all_peers_to_die(Group, Reason),
     {stop, Reason, State};
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason},
             State = #state{delegate = Delegate,
                            group    = Group,
                            tx_fun   = TxFun,
-                           overall  = O}) ->
+                           overall  = O,
+                           child_order = ChildOrder}) ->
     %% TODO load balance this
     %% No guarantee pg2 will have received the DOWN before us.
     R = case lists:sort(?PG2:get_members(Group)) -- [Pid] of
             [O | _] -> ChildSpecs =
                            TxFun(fun() -> update_all(O, Pid) end),
-                       [start(Delegate, ChildSpec) || ChildSpec <- ChildSpecs];
+                       [start(Delegate, ChildSpec)
+                        || ChildSpec <- restore_child_order(ChildSpecs,
+                           ChildOrder)];
             _       -> []
         end,
     case errors(R) of
@@ -411,14 +416,14 @@ maybe_start(Group, TxFun, Overall, Delegate, ChildSpec) ->
 
 check_start(Group, Overall, Delegate, ChildSpec) ->
     case mnesia:wread({?TABLE, {Group, id(ChildSpec)}}) of
-        []  -> write(Group, Overall, ChildSpec),
+        []  -> _ = write(Group, Overall, ChildSpec),
                start;
         [S] -> #mirrored_sup_childspec{key           = {Group, Id},
                                        mirroring_pid = Pid} = S,
                case Overall of
                    Pid -> child(Delegate, Id);
                    _   -> case supervisor(Pid) of
-                              dead      -> write(Group, Overall, ChildSpec),
+                              dead      -> _ = write(Group, Overall, ChildSpec),
                                            start;
                               Delegate0 -> child(Delegate0, Id)
                           end
@@ -515,3 +520,14 @@ add_proplists([{K1, _} = KV | P1], [{K2, _} | _] = P2, Acc) when K1 < K2 ->
     add_proplists(P1, P2, [KV | Acc]);
 add_proplists(P1, [KV | P2], Acc) ->
     add_proplists(P1, P2, [KV | Acc]).
+
+child_order_from(ChildSpecs) ->
+    lists:zipwith(fun(C, N) ->
+                          {id(C), N}
+                  end, ChildSpecs, lists:seq(1, length(ChildSpecs))).
+
+restore_child_order(ChildSpecs, ChildOrder) ->
+    lists:sort(fun(A, B) ->
+                       proplists:get_value(id(A), ChildOrder)
+                           < proplists:get_value(id(B), ChildOrder)
+               end, ChildSpecs).

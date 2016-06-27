@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_reader).
@@ -53,12 +53,12 @@
 -include("rabbit_framing.hrl").
 -include("rabbit.hrl").
 
--export([start_link/1, info_keys/0, info/1, info/2, force_event_refresh/2,
+-export([start_link/3, info_keys/0, info/1, info/2, force_event_refresh/2,
          shutdown/2]).
 
 -export([system_continue/3, system_terminate/4, system_code_change/4]).
 
--export([init/2, mainloop/4, recvloop/4]).
+-export([init/4, mainloop/4, recvloop/4]).
 
 -export([conserve_resources/3, server_properties/1]).
 
@@ -165,7 +165,7 @@
 -define(INFO_KEYS, ?CREATION_EVENT_KEYS ++ ?STATISTICS_KEYS -- [pid]).
 
 -define(AUTH_NOTIFICATION_INFO_KEYS,
-        [host, vhost, name, peer_host, peer_port, protocol, auth_mechanism,
+        [host, name, peer_host, peer_port, protocol, auth_mechanism,
          ssl, ssl_protocol, ssl_cipher, peer_cert_issuer, peer_cert_subject,
          peer_cert_validity]).
 
@@ -182,7 +182,7 @@
 
 -ifdef(use_specs).
 
--spec(start_link/1 :: (pid()) -> rabbit_types:ok(pid())).
+-spec(start_link/3 :: (pid(), any(), rabbit_net:socket()) -> rabbit_types:ok(pid())).
 -spec(info_keys/0 :: () -> rabbit_types:info_keys()).
 -spec(info/1 :: (pid()) -> rabbit_types:infos()).
 -spec(info/2 :: (pid(), rabbit_types:info_keys()) -> rabbit_types:infos()).
@@ -196,12 +196,9 @@
                                   rabbit_framing:amqp_table()).
 
 %% These specs only exists to add no_return() to keep dialyzer happy
--spec(init/2 :: (pid(), pid()) -> no_return()).
--spec(start_connection/5 ::
-        (pid(), pid(), any(), rabbit_net:socket(),
-         fun ((rabbit_net:socket()) ->
-                     rabbit_types:ok_or_error2(
-                       rabbit_net:socket(), any()))) -> no_return()).
+-spec(init/4 :: (pid(), pid(), any(), rabbit_net:socket()) -> no_return()).
+-spec(start_connection/4 ::
+        (pid(), pid(), any(), rabbit_net:socket()) -> no_return()).
 
 -spec(mainloop/4 :: (_,[binary()], non_neg_integer(), #v1{}) -> any()).
 -spec(system_code_change/4 :: (_,_,_,_) -> {'ok',_}).
@@ -213,18 +210,27 @@
 
 %%--------------------------------------------------------------------------
 
-start_link(HelperSup) ->
-    {ok, proc_lib:spawn_link(?MODULE, init, [self(), HelperSup])}.
+start_link(HelperSup, Ref, Sock) ->
+    Pid = proc_lib:spawn_link(?MODULE, init, [self(), HelperSup, Ref, Sock]),
+
+    %% In the event that somebody floods us with connections, the
+    %% reader processes can spew log events at error_logger faster
+    %% than it can keep up, causing its mailbox to grow unbounded
+    %% until we eat all the memory available and crash. So here is a
+    %% meaningless synchronous call to the underlying gen_event
+    %% mechanism. When it returns the mailbox is drained, and we
+    %% return to our caller to accept more connections.
+    gen_event:which_handlers(error_logger),
+
+    {ok, Pid}.
 
 shutdown(Pid, Explanation) ->
     gen_server:call(Pid, {shutdown, Explanation}, infinity).
 
-init(Parent, HelperSup) ->
+init(Parent, HelperSup, Ref, Sock) ->
+    rabbit_net:accept_ack(Ref, Sock),
     Deb = sys:debug_options([]),
-    receive
-        {go, Sock, SockTransform} ->
-            start_connection(Parent, HelperSup, Deb, Sock, SockTransform)
-    end.
+    start_connection(Parent, HelperSup, Deb, Sock).
 
 system_continue(Parent, Deb, {Buf, BufLen, State}) ->
     mainloop(Deb, Buf, BufLen, State#v1{parent = Parent}).
@@ -293,7 +299,8 @@ server_capabilities(rabbit_framing_amqp_0_9_1) ->
      {<<"connection.blocked">>,           bool, true},
      {<<"consumer_priorities">>,          bool, true},
      {<<"authentication_failure_close">>, bool, true},
-     {<<"per_consumer_qos">>,             bool, true}];
+     {<<"per_consumer_qos">>,             bool, true},
+     {<<"direct_reply_to">>,              bool, true}];
 server_capabilities(_) ->
     [].
 
@@ -323,12 +330,11 @@ socket_op(Sock, Fun) ->
     case Fun(Sock) of
         {ok, Res}       -> Res;
         {error, Reason} -> socket_error(Reason),
-                           %% NB: this is tcp socket, even in case of ssl
                            rabbit_net:fast_close(Sock),
                            exit(normal)
     end.
 
-start_connection(Parent, HelperSup, Deb, Sock, SockTransform) ->
+start_connection(Parent, HelperSup, Deb, Sock) ->
     process_flag(trap_exit, true),
     Name = case rabbit_net:connection_string(Sock, inbound) of
                {ok, Str}         -> Str;
@@ -340,13 +346,12 @@ start_connection(Parent, HelperSup, Deb, Sock, SockTransform) ->
            end,
     {ok, HandshakeTimeout} = application:get_env(rabbit, handshake_timeout),
     InitialFrameMax = application:get_env(rabbit, initial_frame_max, ?FRAME_MIN_SIZE),
-    ClientSock = socket_op(Sock, SockTransform),
     erlang:send_after(HandshakeTimeout, self(), handshake_timeout),
     {PeerHost, PeerPort, Host, Port} =
         socket_op(Sock, fun (S) -> rabbit_net:socket_ends(S, inbound) end),
     ?store_proc_name(list_to_binary(Name)),
     State = #v1{parent              = Parent,
-                sock                = ClientSock,
+                sock                = Sock,
                 connection          = #connection{
                   name               = list_to_binary(Name),
                   host               = Host,
@@ -394,27 +399,30 @@ start_connection(Parent, HelperSup, Deb, Sock, SockTransform) ->
         %% the socket. However, to keep the file_handle_cache
         %% accounting as accurate as possible we ought to close the
         %% socket w/o delay before termination.
-        rabbit_net:fast_close(ClientSock),
+        rabbit_net:fast_close(Sock),
         rabbit_networking:unregister_connection(self()),
         rabbit_event:notify(connection_closed, [{pid, self()}])
     end,
     done.
 
 log_connection_exception(Name, Ex) ->
-  Severity = case Ex of
-      connection_closed_with_no_data_received -> debug;
-      connection_closed_abruptly              -> warning;
-      _                                       -> error
-    end,
-  log_connection_exception(Severity, Name, Ex).
+    Severity = case Ex of
+                   connection_closed_with_no_data_received -> debug;
+                   connection_closed_abruptly              -> warning;
+                   _                                       -> error
+               end,
+    log_connection_exception(Severity, Name, Ex).
 
 log_connection_exception(Severity, Name, {heartbeat_timeout, TimeoutSec}) ->
-  %% Long line to avoid extra spaces and line breaks in log
-  log(Severity, "closing AMQP connection ~p (~s):~nMissed heartbeats from client, timeout: ~ps~n",
-    [self(), Name, TimeoutSec]);
+    %% Long line to avoid extra spaces and line breaks in log
+    log(Severity, "closing AMQP connection ~p (~s):~nmissed heartbeats from client, timeout: ~ps~n",
+        [self(), Name, TimeoutSec]);
+log_connection_exception(Severity, Name, connection_closed_abruptly) ->
+    log(Severity, "closing AMQP connection ~p (~s):~nclient unexpectedly closed TCP connection~n",
+        [self(), Name]);
 log_connection_exception(Severity, Name, Ex) ->
-  log(Severity, "closing AMQP connection ~p (~s):~n~p~n",
-    [self(), Name, Ex]).
+    log(Severity, "closing AMQP connection ~p (~s):~n~p~n",
+        [self(), Name, Ex]).
 
 run({M, F, A}) ->
     try apply(M, F, A)
@@ -482,6 +490,10 @@ mainloop(Deb, Buf, BufLen, State = #v1{sock = Sock,
             stop(tcp_healthcheck, State);
         closed ->
             stop(closed, State);
+        {other, {heartbeat_send_error, Reason}} ->
+            %% The only portable way to detect disconnect on blocked
+            %% connection is to wait for heartbeat send failure.
+            stop(Reason, State);
         {error, Reason} ->
             stop(Reason, State);
         {other, {system, From, Request}} ->
@@ -684,7 +696,7 @@ close_connection(State = #v1{queue_collector = Collector,
     %% current connection, and are deleted when that connection
     %% closes."  This does not strictly imply synchrony, but in
     %% practice it seems to be what people assume.
-    rabbit_queue_collector:delete_all(Collector),
+    clean_up_exclusive_queues(Collector),
     %% We terminate the connection after the specified interval, but
     %% no later than ?CLOSING_TIMEOUT seconds.
     erlang:send_after((if TimeoutSec > 0 andalso
@@ -692,6 +704,15 @@ close_connection(State = #v1{queue_collector = Collector,
                           true                          -> ?CLOSING_TIMEOUT
                        end) * 1000, self(), terminate_connection),
     State#v1{connection_state = closed}.
+
+%% queue collector will be undefined when connection
+%% tuning was never performed or didn't finish. In such cases
+%% there's also nothing to clean up.
+clean_up_exclusive_queues(undefined) ->
+    ok;
+
+clean_up_exclusive_queues(Collector) ->
+    rabbit_queue_collector:delete_all(Collector).
 
 handle_dependent_exit(ChPid, Reason, State) ->
     {Channel, State1} = channel_cleanup(ChPid, State),
@@ -725,7 +746,8 @@ wait_for_channel_termination(N, TimerRef,
                                          connection = #connection{
                                                          name  = ConnName,
                                                          user  = User,
-                                                         vhost = VHost}}) ->
+                                                         vhost = VHost},
+                                         sock = Sock}) ->
     receive
         {'DOWN', _MRef, process, ChPid, Reason} ->
             {Channel, State1} = channel_cleanup(ChPid, State),
@@ -742,6 +764,9 @@ wait_for_channel_termination(N, TimerRef,
                          CS, Channel, Reason]),
                     wait_for_channel_termination(N-1, TimerRef, State1)
             end;
+        {'EXIT', Sock, _Reason} ->
+            [channel_cleanup(ChPid, State) || ChPid <- all_channels()],
+            exit(normal);
         cancel_wait ->
             exit(channel_termination_timeout)
     end.
@@ -759,6 +784,14 @@ maybe_close(State) ->
 termination_kind(normal) -> controlled;
 termination_kind(_)      -> uncontrolled.
 
+format_hard_error(#amqp_error{name = N, explanation = E, method = M}) ->
+    io_lib:format("operation ~s caused a connection exception ~s: ~p", [M, N, E]);
+format_hard_error(Reason) ->
+    case io_lib:deep_char_list(Reason) of
+        true  -> Reason;
+        false -> rabbit_misc:format("~p", [Reason])
+    end.
+
 log_hard_error(#v1{connection_state = CS,
                    connection = #connection{
                                    name  = ConnName,
@@ -766,8 +799,8 @@ log_hard_error(#v1{connection_state = CS,
                                    vhost = VHost}}, Channel, Reason) ->
     log(error,
         "Error on AMQP connection ~p (~s, vhost: '~s',"
-        " user: '~s', state: ~p), channel ~p:~n~p~n",
-        [self(), ConnName, VHost, User#user.username, CS, Channel, Reason]).
+        " user: '~s', state: ~p), channel ~p:~n~s~n",
+        [self(), ConnName, VHost, User#user.username, CS, Channel, format_hard_error(Reason)]).
 
 handle_exception(State = #v1{connection_state = closed}, Channel, Reason) ->
     log_hard_error(State, Channel, Reason),
@@ -777,11 +810,54 @@ handle_exception(State = #v1{connection = #connection{protocol = Protocol},
                  Channel, Reason)
   when ?IS_RUNNING(State) orelse CS =:= closing ->
     respond_and_close(State, Channel, Protocol, Reason, Reason);
+%% authentication failure
+handle_exception(State = #v1{connection = #connection{protocol = Protocol,
+                                                      name = ConnName,
+                                                      capabilities = Capabilities},
+                             connection_state = starting},
+                 Channel, Reason = #amqp_error{name = access_refused,
+                                               explanation = ErrMsg}) ->
+    log(error,
+        "Error on AMQP connection ~p (~s, state: ~p):~n~s~n",
+        [self(), ConnName, starting, ErrMsg]),
+    %% respect authentication failure notification capability
+    case rabbit_misc:table_lookup(Capabilities,
+                                  <<"authentication_failure_close">>) of
+        {bool, true} ->
+            send_error_on_channel0_and_close(Channel, Protocol, Reason, State);
+        _ ->
+            close_connection(terminate_channels(State))
+    end;
+%% when loopback-only user tries to connect from a non-local host
+%% when user tries to access a vhost it has no permissions for
+handle_exception(State = #v1{connection = #connection{protocol = Protocol,
+                                                      name = ConnName,
+                                                      user = User},
+                             connection_state = opening},
+                 Channel, Reason = #amqp_error{name = not_allowed,
+                                               explanation = ErrMsg}) ->
+    log(error,
+        "Error on AMQP connection ~p (~s, user: '~s', state: ~p):~n~s~n",
+        [self(), ConnName, User#user.username, opening, ErrMsg]),
+    send_error_on_channel0_and_close(Channel, Protocol, Reason, State);
 handle_exception(State = #v1{connection = #connection{protocol = Protocol},
                              connection_state = CS = opening},
                  Channel, Reason = #amqp_error{}) ->
     respond_and_close(State, Channel, Protocol, Reason,
                       {handshake_error, CS, Reason});
+%% when negotiation fails, e.g. due to channel_max being higher than the
+%% maxiumum allowed limit
+handle_exception(State = #v1{connection = #connection{protocol = Protocol,
+                                                      name = ConnName,
+                                                      user = User},
+                             connection_state = tuning},
+                 Channel, Reason = #amqp_error{name = not_allowed,
+                                               explanation = ErrMsg}) ->
+    log(error,
+        "Error on AMQP connection ~p (~s,"
+        " user: '~s', state: ~p):~n~s~n",
+        [self(), ConnName, User#user.username, tuning, ErrMsg]),
+    send_error_on_channel0_and_close(Channel, Protocol, Reason, State);
 handle_exception(State, Channel, Reason) ->
     %% We don't trust the client at this point - force them to wait
     %% for a bit so they can't DOS us with repeated failed logins etc.
@@ -1093,8 +1169,19 @@ handle_method0(#'connection.tune_ok'{frame_max   = FrameMax,
     {ok, Collector} = rabbit_connection_helper_sup:start_queue_collector(
                         SupPid, Connection#connection.name),
     Frame = rabbit_binary_generator:build_heartbeat_frame(),
-    SendFun = fun() -> catch rabbit_net:send(Sock, Frame) end,
     Parent = self(),
+    SendFun =
+        fun() ->
+                case catch rabbit_net:send(Sock, Frame) of
+                    ok ->
+                        ok;
+                    {error, Reason} ->
+                        Parent ! {heartbeat_send_error, Reason};
+                    Unexpected ->
+                        Parent ! {heartbeat_send_error, Unexpected}
+                end,
+                ok
+        end,
     ReceiveFun = fun() -> Parent ! heartbeat_timeout end,
     Heartbeater = rabbit_heartbeat:start(
                     SupPid, Sock, Connection#connection.name,
@@ -1156,7 +1243,7 @@ handle_method0(_Method, #v1{connection_state = S}) ->
 validate_negotiated_integer_value(Field, Min, ClientValue) ->
     ServerValue = get_env(Field),
     if ClientValue /= 0 andalso ClientValue < Min ->
-            fail_negotiation(Field, min, ServerValue, ClientValue);
+            fail_negotiation(Field, min, Min, ClientValue);
        ServerValue /= 0 andalso (ClientValue =:= 0 orelse
                                  ClientValue > ServerValue) ->
             fail_negotiation(Field, max, ServerValue, ClientValue);
@@ -1378,13 +1465,7 @@ emit_stats(State) ->
     Infos = infos(?STATISTICS_KEYS, State),
     rabbit_event:notify(connection_stats, Infos),
     State1 = rabbit_event:reset_stats_timer(State, #v1.stats_timer),
-    %% If we emit an event which looks like we are in flow control, it's not a
-    %% good idea for it to be our last even if we go idle. Keep emitting
-    %% events, either we stay busy or we drop out of flow control.
-    case proplists:get_value(state, Infos) of
-        flow -> ensure_stats_timer(State1);
-        _    -> State1
-    end.
+    ensure_stats_timer(State1).
 
 %% 1.0 stub
 -ifdef(use_specs).
@@ -1416,6 +1497,9 @@ pack_for_1_0(Buf, BufLen, #v1{parent       = Parent,
 
 respond_and_close(State, Channel, Protocol, Reason, LogErr) ->
     log_hard_error(State, Channel, LogErr),
+    send_error_on_channel0_and_close(Channel, Protocol, Reason, State).
+
+send_error_on_channel0_and_close(Channel, Protocol, Reason, State) ->
     {0, CloseMethod} =
         rabbit_binary_generator:map_exception(Channel, Reason, Protocol),
     State1 = close_connection(terminate_channels(State)),

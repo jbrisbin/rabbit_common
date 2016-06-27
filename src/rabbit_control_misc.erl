@@ -11,13 +11,14 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_control_misc).
 
 -export([emitting_map/4, emitting_map/5, emitting_map_with_exit_handler/4,
-         emitting_map_with_exit_handler/5, wait_for_info_messages/5]).
+         emitting_map_with_exit_handler/5, wait_for_info_messages/5,
+         print_cmd_result/2]).
 
 -ifdef(use_specs).
 
@@ -27,6 +28,7 @@
         (pid(), reference(), fun(), list()) -> 'ok').
 -spec(emitting_map_with_exit_handler/5 ::
         (pid(), reference(), fun(), list(), atom()) -> 'ok').
+-spec(print_cmd_result/2 :: (atom(), term()) -> 'ok').
 
 -endif.
 
@@ -36,7 +38,8 @@ emitting_map(AggregatorPid, Ref, Fun, List) ->
     ok.
 
 emitting_map(AggregatorPid, Ref, Fun, List, continue) ->
-    emitting_map0(AggregatorPid, Ref, Fun, List, fun step/4).
+    _ = emitting_map0(AggregatorPid, Ref, Fun, List, fun step/4),
+    ok.
 
 emitting_map_with_exit_handler(AggregatorPid, Ref, Fun, List) ->
     emitting_map_with_exit_handler(AggregatorPid, Ref, Fun, List, continue),
@@ -44,13 +47,15 @@ emitting_map_with_exit_handler(AggregatorPid, Ref, Fun, List) ->
     ok.
 
 emitting_map_with_exit_handler(AggregatorPid, Ref, Fun, List, continue) ->
-    emitting_map0(AggregatorPid, Ref, Fun, List, fun step_with_exit_handler/4).
+    _ = emitting_map0(AggregatorPid, Ref, Fun, List, fun step_with_exit_handler/4),
+    ok.
 
 emitting_map0(AggregatorPid, Ref, Fun, List, StepFun) ->
     [StepFun(AggregatorPid, Ref, Fun, Item) || Item <- List].
 
 step(AggregatorPid, Ref, Fun, Item) ->
-    AggregatorPid ! {Ref, Fun(Item), continue}.
+    AggregatorPid ! {Ref, Fun(Item), continue},
+    ok.
 
 step_with_exit_handler(AggregatorPid, Ref, Fun, Item) ->
     Noop = make_ref(),
@@ -60,11 +65,12 @@ step_with_exit_handler(AggregatorPid, Ref, Fun, Item) ->
         Noop ->
             ok;
         Res  ->
-            AggregatorPid ! {Ref, Res, continue}
+            AggregatorPid ! {Ref, Res, continue},
+            ok
     end.
 
 wait_for_info_messages(Pid, Ref, ArgAtoms, DisplayFun, Timeout) ->
-    notify_if_timeout(Pid, Ref, Timeout),
+    _ = notify_if_timeout(Pid, Ref, Timeout),
     wait_for_info_messages(Ref, ArgAtoms, DisplayFun).
 
 wait_for_info_messages(Ref, InfoItemKeys, DisplayFun) when is_reference(Ref) ->
@@ -78,9 +84,13 @@ wait_for_info_messages(Ref, InfoItemKeys, DisplayFun) when is_reference(Ref) ->
         {Ref,  Result, continue} ->
             DisplayFun(Result, InfoItemKeys),
             wait_for_info_messages(Ref, InfoItemKeys, DisplayFun);
+        {error, Error}           ->
+            Error;
         _                        ->
             wait_for_info_messages(Ref, InfoItemKeys, DisplayFun)
     end.
 
 notify_if_timeout(Pid, Ref, Timeout) ->
     timer:send_after(Timeout, Pid, {Ref, {timeout, Timeout}}).
+
+print_cmd_result(authenticate_user, _Result) -> io:format("Success~n").

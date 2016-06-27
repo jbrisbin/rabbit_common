@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_nodes).
@@ -25,6 +25,7 @@
 
 -define(EPMD_TIMEOUT, 30000).
 -define(TCP_DIAGNOSTIC_TIMEOUT, 5000).
+-define(ERROR_LOGGER_HANDLER, rabbit_error_logger_handler).
 
 %%----------------------------------------------------------------------------
 %% Specs
@@ -62,11 +63,20 @@ names(Hostname) ->
     end.
 
 diagnostics(Nodes) ->
+    verbose_erlang_distribution(true),
     NodeDiags = [{"~nDIAGNOSTICS~n===========~n~n"
                   "attempted to contact: ~p~n", [Nodes]}] ++
         [diagnostics_node(Node) || Node <- Nodes] ++
         current_node_details(),
+    verbose_erlang_distribution(false),
     rabbit_misc:format_many(lists:flatten(NodeDiags)).
+
+verbose_erlang_distribution(true) ->
+    net_kernel:verbose(1),
+    error_logger:add_report_handler(?ERROR_LOGGER_HANDLER);
+verbose_erlang_distribution(false) ->
+    net_kernel:verbose(0),
+    error_logger:delete_report_handler(?ERROR_LOGGER_HANDLER).
 
 current_node_details() ->
     [{"~ncurrent node details:~n- node name: ~w", [node()]},
@@ -136,16 +146,26 @@ dist_broken_diagnostics(Name, Host, NamePorts) ->
             [{"  * epmd reports node '~s' running on port ~b", [Name, Port]} |
              case diagnose_connect(Host, Port) of
                  ok ->
-                     [{"  * TCP connection succeeded but Erlang distribution "
-                       "failed~n"
-                       "  * suggestion: hostname mismatch?~n"
-                       "  * suggestion: is the cookie set correctly?~n"
-                       "  * suggestion: is the Erlang distribution using TLS?", []}];
+                     connection_succeeded_diagnostics();
                  {error, Reason} ->
                      [{"  * can't establish TCP connection, reason: ~s~n"
                        "  * suggestion: blocked by firewall?",
                        [rabbit_misc:format_inet_error(Reason)]}]
              end]
+    end.
+
+connection_succeeded_diagnostics() ->
+    case gen_event:call(error_logger, ?ERROR_LOGGER_HANDLER, get_connection_report) of
+        [] ->
+            [{"  * TCP connection succeeded but Erlang distribution "
+              "failed~n"
+              "  * suggestion: hostname mismatch?~n"
+              "  * suggestion: is the cookie set correctly?~n"
+              "  * suggestion: is the Erlang distribution using TLS?", []}];
+        Report ->
+            [{"  * TCP connection succeeded but Erlang distribution "
+              "failed~n", []}]
+                ++ Report
     end.
 
 diagnose_connect(Host, Port) ->
@@ -202,19 +222,9 @@ cluster_name_default() ->
 set_cluster_name(Name) ->
     rabbit_runtime_parameters:set_global(cluster_name, Name).
 
-random(N) ->
-    case get(random_seed) of
-        undefined ->
-            random:seed(erlang:phash2([node()]),
-                        time_compat:monotonic_time(),
-                        time_compat:unique_integer());
-        _ -> ok
-    end,
-    random:uniform(N).
-
 ensure_epmd() ->
     {ok, Prog} = init:get_argument(progname),
-    ID = random(1000000000),
+    ID = rabbit_misc:random(1000000000),
     Port = open_port(
              {spawn_executable, os:find_executable(Prog)},
              [{args, ["-sname", rabbit_misc:format("epmd-starter-~b", [ID]),
