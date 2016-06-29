@@ -11,16 +11,26 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_net).
 -include("rabbit.hrl").
 
+-ifdef(define_tls_atom_version).
+%% In Erlang R16B03, tls_atom_version() is defined in ssl_internal.hrl,
+%% which is not included by ssl_api.hrl. Instead of including it here,
+%% we redefine it to avoid too much pollution.
+-type tls_atom_version() :: sslv3 | tlsv1 | 'tlsv1.1' | 'tlsv1.2'.
+-endif.
+
+-include_lib("ssl/src/ssl_api.hrl").
+
 -export([is_ssl/1, ssl_info/1, controlling_process/2, getstat/2,
          recv/1, sync_recv/2, async_recv/3, port_command/2, getopts/2,
          setopts/2, send/2, close/1, fast_close/1, sockname/1, peername/1,
-         peercert/1, connection_string/2, socket_ends/2, is_loopback/1]).
+         peercert/1, connection_string/2, socket_ends/2, is_loopback/1,
+         accept_ack/2]).
 
 %%---------------------------------------------------------------------------
 
@@ -33,7 +43,7 @@
         'send_cnt' | 'send_max' | 'send_avg' | 'send_oct' | 'send_pend').
 -type(ok_val_or_error(A) :: rabbit_types:ok_or_error2(A, any())).
 -type(ok_or_any_error() :: rabbit_types:ok_or_error(any())).
--type(socket() :: port() | #ssl_socket{}).
+-type(socket() :: port() | ssl:sslsocket()).
 -type(opts() :: [{atom(), any()} |
                  {raw, non_neg_integer(), non_neg_integer(), binary()}]).
 -type(host_or_ip() :: binary() | inet:ip_address()).
@@ -78,6 +88,7 @@
         -> ok_val_or_error({host_or_ip(), rabbit_networking:ip_port(),
                             host_or_ip(), rabbit_networking:ip_port()})).
 -spec(is_loopback/1 :: (socket() | inet:ip_address()) -> boolean()).
+-spec(accept_ack/2 :: (any(), socket()) -> ok).
 
 -endif.
 
@@ -85,27 +96,35 @@
 
 -define(SSL_CLOSE_TIMEOUT, 5000).
 
--define(IS_SSL(Sock), is_record(Sock, ssl_socket)).
+-define(IS_SSL(Sock), is_record(Sock, sslsocket)).
 
 is_ssl(Sock) -> ?IS_SSL(Sock).
 
+%% Seems hackish. Is hackish. But the structure is stable and
+%% kept this way for backward compatibility reasons. We need
+%% it for two reasons: there are no ssl:getstat(Sock) function,
+%% and no ssl:close(Timeout) function. Both of them are being
+%% worked on as we speak.
+ssl_get_socket(Sock) ->
+    element(2, element(2, Sock)).
+
 ssl_info(Sock) when ?IS_SSL(Sock) ->
-    ssl_compat:connection_information(Sock#ssl_socket.ssl);
+    ssl_compat:connection_information(Sock);
 ssl_info(_Sock) ->
     nossl.
 
 controlling_process(Sock, Pid) when ?IS_SSL(Sock) ->
-    ssl:controlling_process(Sock#ssl_socket.ssl, Pid);
+    ssl:controlling_process(Sock, Pid);
 controlling_process(Sock, Pid) when is_port(Sock) ->
     gen_tcp:controlling_process(Sock, Pid).
 
 getstat(Sock, Stats) when ?IS_SSL(Sock) ->
-    inet:getstat(Sock#ssl_socket.tcp, Stats);
+    inet:getstat(ssl_get_socket(Sock), Stats);
 getstat(Sock, Stats) when is_port(Sock) ->
     inet:getstat(Sock, Stats).
 
 recv(Sock) when ?IS_SSL(Sock) ->
-    recv(Sock#ssl_socket.ssl, {ssl, ssl_closed, ssl_error});
+    recv(Sock, {ssl, ssl_closed, ssl_error});
 recv(Sock) when is_port(Sock) ->
     recv(Sock, {tcp, tcp_closed, tcp_error}).
 
@@ -118,7 +137,7 @@ recv(S, {DataTag, ClosedTag, ErrorTag}) ->
     end.
 
 sync_recv(Sock, Length) when ?IS_SSL(Sock) ->
-    ssl:recv(Sock#ssl_socket.ssl, Length);
+    ssl:recv(Sock, Length);
 sync_recv(Sock, Length) ->
     gen_tcp:recv(Sock, Length).
 
@@ -127,7 +146,7 @@ async_recv(Sock, Length, Timeout) when ?IS_SSL(Sock) ->
     Ref = make_ref(),
 
     spawn(fun () -> Pid ! {inet_async, Sock, Ref,
-                           ssl:recv(Sock#ssl_socket.ssl, Length, Timeout)}
+                           ssl:recv(Sock, Length, Timeout)}
           end),
 
     {ok, Ref};
@@ -137,7 +156,7 @@ async_recv(Sock, Length, Timeout) when is_port(Sock) ->
     prim_inet:async_recv(Sock, Length, Timeout).
 
 port_command(Sock, Data) when ?IS_SSL(Sock) ->
-    case ssl:send(Sock#ssl_socket.ssl, Data) of
+    case ssl:send(Sock, Data) of
         ok              -> self() ! {inet_reply, Sock, ok},
                            true;
         {error, Reason} -> erlang:error(Reason)
@@ -146,19 +165,19 @@ port_command(Sock, Data) when is_port(Sock) ->
     erlang:port_command(Sock, Data).
 
 getopts(Sock, Options) when ?IS_SSL(Sock) ->
-    ssl:getopts(Sock#ssl_socket.ssl, Options);
+    ssl:getopts(Sock, Options);
 getopts(Sock, Options) when is_port(Sock) ->
     inet:getopts(Sock, Options).
 
 setopts(Sock, Options) when ?IS_SSL(Sock) ->
-    ssl:setopts(Sock#ssl_socket.ssl, Options);
+    ssl:setopts(Sock, Options);
 setopts(Sock, Options) when is_port(Sock) ->
     inet:setopts(Sock, Options).
 
-send(Sock, Data) when ?IS_SSL(Sock) -> ssl:send(Sock#ssl_socket.ssl, Data);
+send(Sock, Data) when ?IS_SSL(Sock) -> ssl:send(Sock, Data);
 send(Sock, Data) when is_port(Sock) -> gen_tcp:send(Sock, Data).
 
-close(Sock)      when ?IS_SSL(Sock) -> ssl:close(Sock#ssl_socket.ssl);
+close(Sock)      when ?IS_SSL(Sock) -> ssl:close(Sock);
 close(Sock)      when is_port(Sock) -> gen_tcp:close(Sock).
 
 fast_close(Sock) when ?IS_SSL(Sock) ->
@@ -173,7 +192,7 @@ fast_close(Sock) when ?IS_SSL(Sock) ->
     %% 0), which may never return if the client doesn't send a FIN or
     %% that gets swallowed by the network. Since there is no timeout
     %% variant of ssl:close, we construct our own.
-    {Pid, MRef} = spawn_monitor(fun () -> ssl:close(Sock#ssl_socket.ssl) end),
+    {Pid, MRef} = spawn_monitor(fun () -> ssl:close(Sock) end),
     erlang:send_after(?SSL_CLOSE_TIMEOUT, self(), {Pid, ssl_close_timeout}),
     receive
         {Pid, ssl_close_timeout} ->
@@ -182,18 +201,18 @@ fast_close(Sock) when ?IS_SSL(Sock) ->
         {'DOWN', MRef, process, Pid, _Reason} ->
             ok
     end,
-    catch port_close(Sock#ssl_socket.tcp),
+    catch port_close(ssl_get_socket(Sock)),
     ok;
 fast_close(Sock) when is_port(Sock) ->
     catch port_close(Sock), ok.
 
-sockname(Sock)   when ?IS_SSL(Sock) -> ssl:sockname(Sock#ssl_socket.ssl);
+sockname(Sock)   when ?IS_SSL(Sock) -> ssl:sockname(Sock);
 sockname(Sock)   when is_port(Sock) -> inet:sockname(Sock).
 
-peername(Sock)   when ?IS_SSL(Sock) -> ssl:peername(Sock#ssl_socket.ssl);
+peername(Sock)   when ?IS_SSL(Sock) -> ssl:peername(Sock);
 peername(Sock)   when is_port(Sock) -> inet:peername(Sock).
 
-peercert(Sock)   when ?IS_SSL(Sock) -> ssl:peercert(Sock#ssl_socket.ssl);
+peercert(Sock)   when ?IS_SSL(Sock) -> ssl:peercert(Sock);
 peercert(Sock)   when is_port(Sock) -> nossl.
 
 connection_string(Sock, Direction) ->
@@ -244,3 +263,19 @@ is_loopback({0,0,0,0,0,65535,AB,CD}) -> is_loopback(ipv4(AB, CD));
 is_loopback(_)                       -> false.
 
 ipv4(AB, CD) -> {AB bsr 8, AB band 255, CD bsr 8, CD band 255}.
+
+accept_ack(Ref, Sock) ->
+    ok = ranch:accept_ack(Ref),
+    case tune_buffer_size(Sock) of
+        ok         -> ok;
+        {error, _} -> rabbit_net:fast_close(Sock),
+                      exit(normal)
+    end,
+    ok = file_handle_cache:obtain().
+
+tune_buffer_size(Sock) ->
+    case getopts(Sock, [sndbuf, recbuf, buffer]) of
+        {ok, BufSizes} -> BufSz = lists:max([Sz || {_Opt, Sz} <- BufSizes]),
+                          setopts(Sock, [{buffer, BufSz}]);
+        Error          -> Error
+    end.

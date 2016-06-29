@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_channel).
@@ -392,6 +392,7 @@ init([Channel, ReaderPid, WriterPid, ConnPid, ConnName, Protocol, User, VHost,
     rabbit_event:notify(channel_created, infos(?CREATION_EVENT_KEYS, State2)),
     rabbit_event:if_enabled(State2, #ch.stats_timer,
                             fun() -> emit_stats(State2) end),
+    put(channel_operation_timeout, ?CHANNEL_OPERATION_TIMEOUT),
     {ok, State2, hibernate,
      {backoff, ?HIBERNATE_AFTER_MIN, ?HIBERNATE_AFTER_MIN, ?DESIRED_HIBERNATE}}.
 
@@ -606,14 +607,8 @@ handle_pre_hibernate(State) ->
                 end),
     {hibernate, rabbit_event:stop_stats_timer(State, #ch.stats_timer)}.
 
-terminate(Reason, State) ->
-    {Res, _State1} = notify_queues(State),
-    case Reason of
-        normal            -> ok = Res;
-        shutdown          -> ok = Res;
-        {shutdown, _Term} -> ok = Res;
-        _                 -> ok
-    end,
+terminate(_Reason, State) ->
+    {_Res, _State1} = notify_queues(State),
     pg_local:leave(rabbit_channels, self()),
     rabbit_event:if_enabled(State, #ch.stats_timer,
                             fun() -> emit_stats(State) end),
@@ -652,6 +647,11 @@ send(_Command, #ch{state = closing}) ->
 send(Command, #ch{writer_pid = WriterPid}) ->
     ok = rabbit_writer:send_command(WriterPid, Command).
 
+format_soft_error(#amqp_error{name = N, explanation = E, method = M}) ->
+    io_lib:format("operation ~s caused a channel exception ~s: ~p", [M, N, E]);
+format_soft_error(Reason) ->
+    Reason.
+
 handle_exception(Reason, State = #ch{protocol     = Protocol,
                                      channel      = Channel,
                                      writer_pid   = WriterPid,
@@ -665,9 +665,9 @@ handle_exception(Reason, State = #ch{protocol     = Protocol,
     case rabbit_binary_generator:map_exception(Channel, Reason, Protocol) of
         {Channel, CloseMethod} ->
             log(error, "Channel error on connection ~p (~s, vhost: '~s',"
-                       " user: '~s'), channel ~p:~n~p~n",
-                       [ConnPid, ConnName, VHost, User#user.username,
-                        Channel, Reason]),
+                " user: '~s'), channel ~p:~n~s~n",
+                [ConnPid, ConnName, VHost, User#user.username,
+                 Channel, format_soft_error(Reason)]),
             ok = rabbit_writer:send_command(WriterPid, CloseMethod),
             {noreply, State1};
         {0, _} ->
@@ -878,7 +878,7 @@ handle_method(_Method, _, State = #ch{state = closing}) ->
     {noreply, State};
 
 handle_method(#'channel.close'{}, _, State = #ch{reader_pid = ReaderPid}) ->
-    {ok, State1} = notify_queues(State),
+    {_Result, State1} = notify_queues(State),
     %% We issue the channel.close_ok response after a handshake with
     %% the reader, the other half of which is ready_for_close. That
     %% way the reader forgets about the channel before we send the
@@ -1765,7 +1765,9 @@ notify_queues(State = #ch{consumer_mapping  = Consumers,
                           delivering_queues = DQ }) ->
     QPids = sets:to_list(
               sets:union(sets:from_list(consumer_queues(Consumers)), DQ)),
-    {rabbit_amqqueue:notify_down_all(QPids, self()), State#ch{state = closing}}.
+    {rabbit_amqqueue:notify_down_all(QPids, self(),
+                                     get(channel_operation_timeout)),
+     State#ch{state = closing}}.
 
 foreach_per_queue(_F, []) ->
     ok;

@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(credit_flow).
@@ -214,7 +214,8 @@ unblock(From) ->
     case blocked() of
         false -> case erase(credit_deferred) of
                      undefined -> ok;
-                     Credits   -> [To ! Msg || {To, Msg} <- Credits]
+                     Credits   -> _ = [To ! Msg || {To, Msg} <- Credits],
+                                  ok
                  end;
         true  -> ok
     end.

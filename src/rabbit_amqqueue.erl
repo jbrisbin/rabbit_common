@@ -11,7 +11,7 @@
 %% The Original Code is RabbitMQ.
 %%
 %% The Initial Developer of the Original Code is GoPivotal, Inc.
-%% Copyright (c) 2007-2015 Pivotal Software, Inc.  All rights reserved.
+%% Copyright (c) 2007-2016 Pivotal Software, Inc.  All rights reserved.
 %%
 
 -module(rabbit_amqqueue).
@@ -25,13 +25,13 @@
          check_exclusive_access/2, with_exclusive_access_or_die/3,
          stat/1, deliver/2, requeue/3, ack/3, reject/4]).
 -export([list/0, list/1, info_keys/0, info/1, info/2, info_all/1, info_all/2,
-         info_all/4]).
+         info_all/6]).
 -export([list_down/1]).
 -export([force_event_refresh/1, notify_policy_changed/1]).
 -export([consumers/1, consumers_all/1,  consumers_all/3, consumer_info_keys/0]).
 -export([basic_get/4, basic_consume/10, basic_cancel/4, notify_decorators/1]).
 -export([notify_sent/2, notify_sent_queue_down/1, resume/2]).
--export([notify_down_all/2, activate_limit_all/2, credit/5]).
+-export([notify_down_all/2, notify_down_all/3, activate_limit_all/2, credit/5]).
 -export([on_node_up/1, on_node_down/1]).
 -export([update/2, store_queue/1, update_decorators/1, policy_changed/2]).
 -export([start_mirroring/1, stop_mirroring/1, sync_mirrors/1,
@@ -44,7 +44,8 @@
 -include("rabbit.hrl").
 -include_lib("stdlib/include/qlc.hrl").
 
--define(INTEGER_ARG_TYPES, [byte, short, signedint, long]).
+-define(INTEGER_ARG_TYPES, [byte, short, signedint, long,
+                            unsignedbyte, unsignedshort, unsignedint]).
 
 -define(MORE_CONSUMER_CREDIT_AFTER, 50).
 
@@ -159,6 +160,8 @@
 -spec(ack/3 :: (pid(), [msg_id()], pid()) -> 'ok').
 -spec(reject/4 :: (pid(), [msg_id()], boolean(), pid()) -> 'ok').
 -spec(notify_down_all/2 :: (qpids(), pid()) -> ok_or_errors()).
+-spec(notify_down_all/3 :: (qpids(), pid(), non_neg_integer())
+                           -> ok_or_errors()).
 -spec(activate_limit_all/2 :: (qpids(), pid()) -> ok_or_errors()).
 -spec(basic_get/4 :: (rabbit_types:amqqueue(), pid(), boolean(), pid()) ->
                           {'ok', non_neg_integer(), qmsg()} | 'empty').
@@ -211,6 +214,19 @@ recover() ->
     %% faster than other nodes handled DOWN messages from us.
     on_node_down(node()),
     DurableQueues = find_durable_queues(),
+    L = length(DurableQueues),
+
+    %% if there are not enough file handles, the server might hang
+    %% when trying to recover queues, warn the user:
+    case file_handle_cache:get_limit() < L of
+        true ->
+            rabbit_log:warning(
+              "Recovering ~p queues, available file handles: ~p. Please increase max open file handles limit to at least ~p!~n",
+              [L, file_handle_cache:get_limit(), L]);
+        false ->
+            ok
+    end,
+
     {ok, BQ} = application:get_env(rabbit, backing_queue_module),
 
     %% We rely on BQ:start/1 returning the recovery terms in the same
@@ -397,7 +413,14 @@ not_found_or_absent_dirty(Name) ->
     end.
 
 with(Name, F, E) ->
+    with(Name, F, E, 2000).
+
+with(Name, F, E, RetriesLeft) ->
     case lookup(Name) of
+        {ok, Q = #amqqueue{}} when RetriesLeft =:= 0 ->
+            %% Something bad happened to that queue, we are bailing out
+            %% on processing current request.
+            E({absent, Q, timeout});
         {ok, Q = #amqqueue{state = crashed}} ->
             E({absent, Q, crashed});
         {ok, Q = #amqqueue{pid = QPid}} ->
@@ -409,8 +432,8 @@ with(Name, F, E) ->
             %% the retry loop.
             rabbit_misc:with_exit_handler(
               fun () -> false = rabbit_mnesia:is_process_alive(QPid),
-                        timer:sleep(25),
-                        with(Name, F, E)
+                        timer:sleep(30),
+                        with(Name, F, E, RetriesLeft - 1)
               end, fun () -> F(Q) end);
         {error, not_found} ->
             E(not_found_or_absent_dirty(Name))
@@ -480,7 +503,8 @@ declare_args() ->
      {<<"x-dead-letter-routing-key">>, fun check_dlxrk_arg/2},
      {<<"x-max-length">>,              fun check_non_neg_int_arg/2},
      {<<"x-max-length-bytes">>,        fun check_non_neg_int_arg/2},
-     {<<"x-max-priority">>,            fun check_non_neg_int_arg/2}].
+     {<<"x-max-priority">>,            fun check_non_neg_int_arg/2},
+     {<<"x-queue-mode">>,              fun check_queue_mode/2}].
 
 consume_args() -> [{<<"x-priority">>,              fun check_int_arg/2},
                    {<<"x-cancel-on-ha-failover">>, fun check_bool_arg/2}].
@@ -525,6 +549,14 @@ check_dlxrk_arg({longstr, _}, Args) ->
         _         -> ok
     end;
 check_dlxrk_arg({Type,    _}, _Args) ->
+    {error, {unacceptable_type, Type}}.
+
+check_queue_mode({longstr, Val}, _Args) ->
+    case lists:member(Val, [<<"default">>, <<"lazy">>]) of
+        true  -> ok;
+        false -> {error, invalid_queue_mode}
+    end;
+check_queue_mode({Type,    _}, _Args) ->
     {error, {unacceptable_type, Type}}.
 
 list() -> mnesia:dirty_match_object(rabbit_queue, #amqqueue{_ = '_'}).
@@ -592,13 +624,16 @@ info_all(VHostPath, Items) ->
     map(list(VHostPath), fun (Q) -> info(Q, Items) end) ++
         map(list_down(VHostPath), fun (Q) -> info_down(Q, Items, down) end).
 
-info_all(VHostPath, Items, Ref, AggregatorPid) ->
-    rabbit_control_misc:emitting_map_with_exit_handler(
-      AggregatorPid, Ref, fun(Q) -> info(Q, Items) end, list(VHostPath),
-      continue),
-    rabbit_control_misc:emitting_map_with_exit_handler(
-      AggregatorPid, Ref, fun(Q) -> info_down(Q, Items) end,
-      list_down(VHostPath)).
+info_all(VHostPath, Items, NeedOnline, NeedOffline, Ref, AggregatorPid) ->
+    NeedOnline andalso rabbit_control_misc:emitting_map_with_exit_handler(
+                         AggregatorPid, Ref, fun(Q) -> info(Q, Items) end, list(VHostPath),
+                         continue),
+    NeedOffline andalso rabbit_control_misc:emitting_map_with_exit_handler(
+                          AggregatorPid, Ref, fun(Q) -> info_down(Q, Items, down) end,
+                          list_down(VHostPath),
+                          continue),
+    %% Previous maps are incomplete, finalize emission
+    rabbit_control_misc:emitting_map(AggregatorPid, Ref, fun(_) -> no_op end, []).
 
 force_event_refresh(Ref) ->
     [gen_server2:cast(Q#amqqueue.pid,
@@ -626,11 +661,10 @@ consumers_all(VHostPath, Ref, AggregatorPid) ->
       list(VHostPath)).
 
 get_queue_consumer_info(Q, ConsumerInfoKeys) ->
-    lists:flatten(
-      [lists:zip(ConsumerInfoKeys,
-                 [Q#amqqueue.name, ChPid, CTag,
-                  AckRequired, Prefetch, Args]) ||
-          {ChPid, CTag, AckRequired, Prefetch, Args} <- consumers(Q)]).
+    [lists:zip(ConsumerInfoKeys,
+               [Q#amqqueue.name, ChPid, CTag,
+                AckRequired, Prefetch, Args]) ||
+        {ChPid, CTag, AckRequired, Prefetch, Args} <- consumers(Q)].
 
 stat(#amqqueue{pid = QPid}) -> delegate:call(QPid, stat).
 
@@ -659,13 +693,23 @@ reject(QPid, Requeue, MsgIds, ChPid) ->
     delegate:cast(QPid, {reject, Requeue, MsgIds, ChPid}).
 
 notify_down_all(QPids, ChPid) ->
-    {_, Bads} = delegate:call(QPids, {notify_down, ChPid}),
-    case lists:filter(
-           fun ({_Pid, {exit, {R, _}, _}}) -> rabbit_misc:is_abnormal_exit(R);
-               ({_Pid, _})                 -> false
-           end, Bads) of
-        []    -> ok;
-        Bads1 -> {error, Bads1}
+    notify_down_all(QPids, ChPid, ?CHANNEL_OPERATION_TIMEOUT).
+
+notify_down_all(QPids, ChPid, Timeout) ->
+    case rpc:call(node(), delegate, call,
+                  [QPids, {notify_down, ChPid}], Timeout) of
+        {badrpc, timeout} -> {error, {channel_operation_timeout, Timeout}};
+        {badrpc, Reason}  -> {error, Reason};
+        {_, Bads} ->
+            case lists:filter(
+                   fun ({_Pid, {exit, {R, _}, _}}) ->
+                           rabbit_misc:is_abnormal_exit(R);
+                       ({_Pid, _})                 -> false
+                   end, Bads) of
+                []    -> ok;
+                Bads1 -> {error, Bads1}
+            end;
+        Error         -> {error, Error}
     end.
 
 activate_limit_all(QPids, ChPid) ->
