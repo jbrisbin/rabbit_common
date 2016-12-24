@@ -1343,7 +1343,7 @@ format_status(Opt, StatusData) ->
               end,
     Header = lists:concat(["Status for generic server ", NameTag]),
     Log = sys:get_debug(log, Debug, []),
-    Specfic = callback(Mod, format_status, [Opt, [PDict, State]],
+    Specific = callback(Mod, format_status, [Opt, [PDict, State]],
                        fun () -> [{data, [{"State", State}]}] end),
     Messages = callback(Mod, format_message_queue, [Opt, Queue],
                         fun () -> priority_queue:to_list(Queue) end),
@@ -1352,7 +1352,7 @@ format_status(Opt, StatusData) ->
              {"Parent", Parent},
              {"Logged events", Log},
              {"Queued messages", Messages}]} |
-     Specfic].
+     Specific].
 
 callback(Mod, FunName, Args, DefaultThunk) ->
     case erlang:function_exported(Mod, FunName, length(Args)) of
