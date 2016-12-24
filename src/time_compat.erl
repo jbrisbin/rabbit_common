@@ -242,7 +242,7 @@ unique_integer_pre_18(Modifiers) ->
     case is_valid_modifier_list(Modifiers) of
 		true ->
 		    %% now() converted to an integer
-		    %% fullfill the requirements of
+		    %% fulfill the requirements of
 		    %% all modifiers: unique, positive,
 		    %% and monotonic...
 		    {MS, S, US} = erlang:now(),
