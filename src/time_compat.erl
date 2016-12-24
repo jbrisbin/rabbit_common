@@ -26,7 +26,7 @@
 %% versions. This way your code can automatically take advantage
 %% of the improvements in the API when available. This is an
 %% example of how to implement such an API, but it can be used
-%% as is if you want to. Just add (a preferrably renamed version of)
+%% as is if you want to. Just add (a preferably renamed version of)
 %% this module to your project, and call the API via this module
 %% instead of calling the BIFs directly.
 %%
