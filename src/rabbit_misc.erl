@@ -909,7 +909,7 @@ pget_or_die(K, P) ->
         V         -> V
     end.
 
-%% property merge 
+%% property merge
 pmerge(Key, Val, List) ->
       case proplists:is_defined(Key, List) of
               true -> List;
@@ -919,9 +919,9 @@ pmerge(Key, Val, List) ->
 %% proplists merge
 plmerge(P1, P2) ->
     dict:to_list(dict:merge(fun(_, V, _) ->
-                                V 
-                            end, 
-                            dict:from_list(P1), 
+                                V
+                            end,
+                            dict:from_list(P1),
                             dict:from_list(P2))).
 
 pset(Key, Value, List) -> [{Key, Value} | proplists:delete(Key, List)].
@@ -1166,12 +1166,12 @@ moving_average(Time,  HalfLife,  Next, Current) ->
 random(N) ->
     case get(random_seed) of
         undefined ->
-            random:seed(erlang:phash2([node()]),
+            rand:seed(exsplus, {erlang:phash2([node()]),
                         time_compat:monotonic_time(),
-                        time_compat:unique_integer());
+                        time_compat:unique_integer()});
         _ -> ok
     end,
-    random:uniform(N).
+    rand:uniform(N).
 
 %% Moved from rabbit/src/rabbit_cli.erl
 %% If the server we are talking to has non-standard net_ticktime, and
