@@ -13,4 +13,4 @@ The "master" branch of this port is a simple re-packaging of the rabbit_common A
 
 ### License
 
-This package, just like the the RabbitMQ server, is licensed under the MPL. For the MPL, please see LICENSE-MPL-RabbitMQ.
+This package, just like the RabbitMQ server, is licensed under the MPL. For the MPL, please see LICENSE-MPL-RabbitMQ.
